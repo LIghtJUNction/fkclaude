@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.22)
+project(fkclaude LANGUAGES CXX)
+add_library(fkclaude SHARED module.cpp native_config.cpp)
+target_compile_features(fkclaude PRIVATE cxx_std_17)
+target_compile_options(fkclaude PRIVATE -Wall -Wextra -Werror -fvisibility=hidden)
+target_link_options(fkclaude PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports.map" "-Wl,--exclude-libs,ALL" "-Wl,-z,max-page-size=16384")
+set_property(TARGET fkclaude APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/exports.map")
+target_link_libraries(fkclaude PRIVATE dl)

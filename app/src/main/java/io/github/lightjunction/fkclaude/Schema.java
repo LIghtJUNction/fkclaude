@@ -4,7 +4,7 @@ public final class Schema {
     public record Field(int group, String key, String type, String blocked, int label) {
         public String resource() { return "field_" + key.replace('.', '_').toLowerCase(java.util.Locale.ROOT); }
     }
-    public static final int[] GROUP_LABELS = {R.string.groups_0, R.string.groups_1, R.string.groups_2, R.string.groups_3, R.string.groups_4, R.string.groups_5, R.string.groups_6, R.string.groups_7, R.string.groups_8};
+    public static final int[] GROUP_LABELS = {R.string.groups_0, R.string.groups_1, R.string.groups_2, R.string.groups_3, R.string.groups_4, R.string.groups_5, R.string.groups_6, R.string.groups_7, R.string.groups_8, R.string.groups_9, R.string.groups_10};
     public static final Field[] FIELDS = {
         new Field(0, "claude_device_id", "text", "", R.string.field_claude_device_id),
         new Field(0, "android_id", "text", "", R.string.field_android_id),
@@ -81,6 +81,21 @@ public final class Schema {
         new Field(8, "sift_app_name", "text", "", R.string.field_sift_app_name),
         new Field(8, "sift_app_version", "text", "", R.string.field_sift_app_version),
         new Field(8, "sift_sdk_version", "text", "", R.string.field_sift_sdk_version),
+        new Field(9, "native_enabled", "bool", "false", R.string.field_native_enabled),
+        new Field(9, "native_env", "text", "", R.string.field_native_env),
+        new Field(9, "native_sysname", "text", "", R.string.field_native_sysname),
+        new Field(9, "native_hostname", "text", "", R.string.field_native_hostname),
+        new Field(9, "native_kernel_release", "text", "", R.string.field_native_kernel_release),
+        new Field(9, "native_kernel_version", "text", "", R.string.field_native_kernel_version),
+        new Field(9, "native_machine", "text", "", R.string.field_native_machine),
+        new Field(9, "command_isolation", "bool", "false", R.string.field_command_isolation),
+        new Field(9, "native_mount", "text", "", R.string.field_native_mount),
+        new Field(10, "web_enabled", "bool", "false", R.string.field_web_enabled),
+        new Field(10, "block_web_fingerprinting", "bool", "true", R.string.field_block_web_fingerprinting),
+        new Field(10, "web_platform", "text", "", R.string.field_web_platform),
+        new Field(10, "web_vendor", "text", "", R.string.field_web_vendor),
+        new Field(10, "web_device_memory", "float", "0", R.string.field_web_device_memory),
+        new Field(10, "web_origins", "text", "*", R.string.field_web_origins),
     };
     public static boolean isKnown(String key) {
         if (key.equals("enabled")) return true;

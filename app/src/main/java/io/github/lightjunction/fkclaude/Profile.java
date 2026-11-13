@@ -28,6 +28,9 @@ public final class Profile {
             validate(entry.getKey(), entry.getValue());
         }
         values = Collections.unmodifiableMap(new HashMap<>(source));
+        Map<String, String> properties = PropertyView.parse(get("system_properties", ""));
+        for (String[] binding : PropertyView.BINDINGS)
+            if (!has(binding[1]) && properties.containsKey(binding[0])) validate(binding[1], properties.get(binding[0]));
         if (has("memory_total") && has("memory_available") && number("memory_available") > number("memory_total"))
             throw new IllegalArgumentException("Available memory exceeds total");
         if (has("storage_total") && has("storage_available") && number("storage_available") > number("storage_total"))
@@ -67,6 +70,8 @@ public final class Profile {
         randomize(map);
         map.put("locale", "en-US");
         map.put("timezone", "UTC");
+        map.put("native_enabled", "true"); map.put("command_isolation", "true"); map.put("web_enabled", "true");
+        map.put("block_web_fingerprinting", "true");
         for (String key : new String[]{"block_sensors", "block_location", "block_personal_data", "block_package_list", "block_sift"})
             map.put(key, "true");
         for (String key : new String[]{"carrier_name", "sim_operator", "network_operator", "sim_country", "network_country"})
@@ -112,6 +117,7 @@ public final class Profile {
     }
 
     private static void validate(String key, String value) {
+        if (value.indexOf('\0') >= 0) throw new IllegalArgumentException("Embedded NUL");
         String type = Schema.type(key);
         if ("bool".equals(type) && !value.equals("true") && !value.equals("false"))
             throw new IllegalArgumentException(key + ": true / false");
@@ -152,6 +158,19 @@ public final class Profile {
                 && Long.parseLong(value) > Integer.MAX_VALUE) throw new IllegalArgumentException("Integer overflow");
         if (key.equals("network_transport") && Long.parseLong(value) > 10) throw new IllegalArgumentException("network_transport");
         if (key.equals("location_accuracy") && Float.parseFloat(value) < 0) throw new IllegalArgumentException("location_accuracy");
+        if (key.equals("web_device_memory") && (Float.parseFloat(value) < 0 || Float.parseFloat(value) > 1024))
+            throw new IllegalArgumentException("web_device_memory");
+        if (Set.of("native_sysname", "native_hostname", "native_kernel_release", "native_kernel_version", "native_machine").contains(key)
+                && value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 64)
+            throw new IllegalArgumentException("uname field too long");
+        if (key.equals("native_env")) for (var entry : PropertyView.parse(value).entrySet()) {
+            if (!entry.getKey().matches("[A-Za-z_][A-Za-z0-9_]*") || entry.getValue().indexOf('\0') >= 0)
+                throw new IllegalArgumentException("Invalid environment entry");
+        }
+        if (key.equals("system_properties")) for (var entry : PropertyView.parse(value).entrySet()) {
+            if (!entry.getKey().matches("[A-Za-z0-9_.:-]{1,127}") || entry.getValue().indexOf('\0') >= 0)
+                throw new IllegalArgumentException("Invalid property entry");
+        }
         if ((key.equals("screen_width") || key.equals("screen_height") || key.equals("screen_dpi")
                 || key.equals("screen_density")) && Double.parseDouble(value) <= 0)
             throw new IllegalArgumentException(key + ": > 0");

@@ -14,6 +14,7 @@ import android.os.Bundle;
 import android.os.LocaleList;
 import android.util.DisplayMetrics;
 import de.robv.android.xposed.IXposedHookLoadPackage;
+import de.robv.android.xposed.IXposedHookZygoteInit;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
@@ -34,7 +35,8 @@ import java.util.Set;
 import java.util.TimeZone;
 
 /** Every hook is installed only in the scoped Claude process, after loading one immutable profile. */
-public final class EnvironmentHook implements IXposedHookLoadPackage {
+public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHookZygoteInit {
+    private static String modulePath;
     private Profile profile;
     private boolean initialized;
     private int hookCount;
@@ -42,6 +44,7 @@ public final class EnvironmentHook implements IXposedHookLoadPackage {
     private final Map<String, String> androidProperties = new HashMap<>();
     private final Map<String, String> javaProperties = new HashMap<>();
     @FunctionalInterface private interface Action { void run(XC_MethodHook.MethodHookParam param) throws Throwable; }
+    @Override public void initZygote(StartupParam param) { modulePath = param.modulePath; }
 
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam load) throws Throwable {
         if (!Profile.TARGET.equals(load.packageName)) return;
@@ -55,7 +58,7 @@ public final class EnvironmentHook implements IXposedHookLoadPackage {
                     if (version != Profile.TARGET_VERSION) { log("unsupported target version; no overrides installed"); return; }
                     Bundle result = context.getContentResolver().call(ProfileProvider.URI, "read", null, null);
                     if (result == null || !result.containsKey("profile")) { log("profile unavailable; no overrides installed"); return; }
-                    profile = Profile.parse(result.getString("profile"));
+                    profile = PropertyView.normalize(Profile.parse(result.getString("profile")));
                     if (!profile.enabled()) { log("profile disabled"); return; }
                     install(context, load.classLoader);
                     log("installed " + hookCount + " hooks for target version " + version + "; runtime effect unverified");
@@ -66,6 +69,8 @@ public final class EnvironmentHook implements IXposedHookLoadPackage {
 
     private void install(Context context, ClassLoader loader) throws Throwable {
         buildProperties(loader);
+        NativeBridge.install(profile, androidProperties);
+        environmentAndCommands(loader);
         identity(loader);
         locale(loader);
         network(loader);
@@ -76,6 +81,7 @@ public final class EnvironmentHook implements IXposedHookLoadPackage {
         diagnostics(loader);
         sift(loader);
         outbound(loader);
+        WebEnvironment.install(profile, modulePath);
     }
 
     private void hook(String cls, ClassLoader loader, String name, boolean before, Action action) {
@@ -125,20 +131,14 @@ public final class EnvironmentHook implements IXposedHookLoadPackage {
         if (profile.has("os_release")) XposedHelpers.setStaticObjectField(Build.VERSION.class, "RELEASE", profile.get("os_release"));
         if (profile.has("security_patch")) XposedHelpers.setStaticObjectField(Build.VERSION.class, "SECURITY_PATCH", profile.get("security_patch"));
         if (profile.has("sdk_level")) XposedHelpers.setStaticIntField(Build.VERSION.class, "SDK_INT", (int) profile.number("sdk_level"));
-        String[][] bindings = {
-                {"ro.product.manufacturer", "build.MANUFACTURER"}, {"ro.product.brand", "build.BRAND"},
-                {"ro.product.model", "build.MODEL"}, {"ro.product.device", "build.DEVICE"},
-                {"ro.product.name", "build.PRODUCT"}, {"ro.product.board", "build.BOARD"},
-                {"ro.hardware", "build.HARDWARE"}, {"ro.bootloader", "build.BOOTLOADER"},
-                {"ro.build.fingerprint", "build.FINGERPRINT"}, {"ro.build.display.id", "build.DISPLAY"},
-                {"ro.build.id", "build.ID"}, {"ro.build.tags", "build.TAGS"}, {"ro.build.type", "build.TYPE"},
-                {"ro.build.user", "build.USER"}, {"ro.build.host", "build.HOST"},
-                {"ro.build.version.release", "os_release"}, {"ro.build.version.security_patch", "security_patch"},
-                {"ro.build.version.sdk", "sdk_level"}, {"ro.serialno", "serial"}, {"ro.boot.serialno", "serial"}
-        };
-        for (String[] pair : bindings) if (profile.has(pair[1])) androidProperties.put(pair[0], profile.get(pair[1]));
-        androidProperties.putAll(propertyMap(profile.get("system_properties", "")));
-        javaProperties.putAll(propertyMap(profile.get("java_properties", "")));
+        androidProperties.putAll(PropertyView.properties(profile));
+        javaProperties.putAll(PropertyView.parse(profile.get("java_properties", "")));
+        if (profile.has("timezone")) javaProperties.put("user.timezone", profile.get("timezone"));
+        if (profile.has("locale")) {
+            Locale language = Locale.forLanguageTag(profile.get("locale"));
+            javaProperties.put("user.language", language.getLanguage());
+            javaProperties.put("user.country", language.getCountry());
+        }
         if (profile.has("user_agent")) javaProperties.put("http.agent", profile.get("user_agent"));
         for (String method : new String[]{"get", "getInt", "getLong", "getBoolean"})
             hook("android.os.SystemProperties", loader, method, true, p -> {
@@ -161,13 +161,32 @@ public final class EnvironmentHook implements IXposedHookLoadPackage {
             });
         }
     }
-    private static Map<String, String> propertyMap(String text) {
-        Properties properties = new Properties();
-        try { properties.load(new java.io.StringReader(text)); }
-        catch (IOException e) { throw new IllegalArgumentException(e); }
-        Map<String, String> map = new HashMap<>();
-        for (String k : properties.stringPropertyNames()) map.put(k, properties.getProperty(k));
-        return map;
+    private void environmentAndCommands(ClassLoader loader) {
+        Map<String, String> environment = PropertyView.environment(profile);
+        if (!environment.isEmpty()) hook("java.lang.System", loader, "getenv", true, p -> {
+            if (p.args.length == 1 && environment.containsKey(p.args[0])) {
+                String value = environment.get(p.args[0]); p.setResult(value.isEmpty() ? null : value);
+            } else if (p.args.length == 0) {
+                Map<String, String> values = new HashMap<>();
+                @SuppressWarnings("unchecked") Map<String, String> original = (Map<String, String>) XposedBridge.invokeOriginalMethod(p.method, p.thisObject, p.args);
+                values.putAll(original);
+                environment.forEach((key, value) -> { if (value.isEmpty()) values.remove(key); else values.put(key, value); });
+                p.setResult(Collections.unmodifiableMap(values));
+            }
+        });
+        if (!Boolean.parseBoolean(profile.get("command_isolation", "true"))) return;
+        hook("java.lang.ProcessBuilder", loader, "start", true, p -> {
+            Process process = VirtualCommand.match(((ProcessBuilder) p.thisObject).command(), profile, androidProperties);
+            if (process != null) p.setResult(process);
+        });
+        hook("java.lang.Runtime", loader, "exec", true, p -> {
+            java.util.List<String> command;
+            if (p.args[0] instanceof String[] array) command = java.util.Arrays.asList(array);
+            else if (p.args[0] instanceof String text) command = java.util.Arrays.asList(text.trim().split("\\s+"));
+            else return;
+            Process process = VirtualCommand.match(command, profile, androidProperties);
+            if (process != null) p.setResult(process);
+        });
     }
     private void identity(ClassLoader loader) {
         if (profile.has("claude_device_id")) {

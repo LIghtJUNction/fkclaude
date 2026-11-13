@@ -121,16 +121,50 @@ def main():
     module = ROOT / "app/build/outputs/apk/debug/app-debug.apk"
     with zipfile.ZipFile(module) as apk:
         assert apk.read("assets/xposed_init").decode().strip() == "io.github.lightjunction.fkclaude.EnvironmentHook"
+        assert apk.read("assets/native_init").decode().strip() == "libfkclaude.so"
+        assert apk.read("assets/environment.js") == (ROOT / "app/src/main/assets/environment.js").read_bytes()
+        assert [n for n in apk.namelist() if n.endswith(".so")] == ["lib/arm64-v8a/libfkclaude.so"]
+        native = apk.read("lib/arm64-v8a/libfkclaude.so")
+        info = apk.getinfo("lib/arm64-v8a/libfkclaude.so")
+    assert native[:6] == b"\x7fELF\x02\x01" and struct.unpack_from("<H", native, 18)[0] == 183
+    program_offset = struct.unpack_from("<Q", native, 32)[0]
+    program_size, program_count = struct.unpack_from("<HH", native, 54)
+    alignments = [struct.unpack_from("<Q", native, program_offset + i * program_size + 48)[0]
+                  for i in range(program_count) if struct.unpack_from("<I", native, program_offset + i * program_size)[0] == 1]
+    assert alignments and all(a >= 16384 for a in alignments), "ELF load alignment below 16 KiB"
+    section_offset = struct.unpack_from("<Q", native, 40)[0]
+    section_size, section_count = struct.unpack_from("<HH", native, 58)
+    sections = [struct.unpack_from("<IIQQQQIIQQ", native, section_offset + i * section_size) for i in range(section_count)]
+    exports = set()
+    for section in sections:
+        if section[1] != 11:
+            continue
+        strings = sections[section[6]]
+        for offset in range(section[4], section[4] + section[5], section[9]):
+            name, binding, visibility, defined, _, _ = struct.unpack_from("<IBBHQQ", native, offset)
+            if defined and binding >> 4 in (1, 2) and visibility & 3 in (0, 3) and name:
+                start = strings[4] + name
+                exports.add(native[start:native.index(b"\0", start)].decode())
+    assert exports == {"native_init", "Java_io_github_lightjunction_fkclaude_NativeBridge_configure"}, exports
+    with module.open("rb") as binary:
+        binary.seek(info.header_offset)
+        local = binary.read(30)
+        name_size, extra_size = struct.unpack_from("<HH", local, 26)
+    assert info.compress_type == zipfile.ZIP_STORED
+    assert (info.header_offset + 30 + name_size + extra_size) % 16384 == 0, "APK native library alignment below 16 KiB"
     module_classes = set().union(*(d.classes for d in read_apk(module)))
     assert "Lio/github/lightjunction/fkclaude/EnvironmentHook;" in module_classes
     assert not any(n.startswith("Lde/robv/android/xposed/") for n in module_classes), "Framework API bundled in APK"
     result = {"dex_method_contracts": len(contracts), "dex_field_contracts": len(field_contracts),
               "configurable_fields": len(keys), "locales_complete": ["en", "zh-CN"],
               "xposed_entry_packaged": True, "framework_api_not_bundled": True,
+              "native_abi": "arm64-v8a", "native_exports": sorted(exports),
+              "native_16k_elf_and_zip_alignment": True, "document_start_asset_packaged": True,
               "runtime_hooks_tested": False}
     out = ROOT / "artifacts/validation"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "static-contracts.json").write_text(json.dumps(result, indent=2) + "\n")
+    version = json.loads((module.parent / "output-metadata.json").read_text())["elements"][0]["versionName"]
+    (out / f"static-contracts-{version}.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
 
 

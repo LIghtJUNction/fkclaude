@@ -2,7 +2,7 @@
     <string name="app_name">fkclaude</string>
     <string name="module_description">为 Claude 提供可配置的环境视图</string>
     <string name="intro">在 LSPosed 中启用模块并勾选 Claude。保存后完全重启 Claude。配置只影响 Claude；各项可沿用原值、拦截或自定义。</string>
-    <string name="limits">Java Hook 并非完整沙箱。原生代码、WebView 脚本及公网 IP 仍可能透露真实环境；模块不伪造硬件或 Play Integrity 证明。</string>
+    <string name="limits">原生与 WebView 覆盖已接入部分接口。直接系统调用、文件、Worker 和公网 IP 仍可能透露真实环境，并非完整沙箱。</string>
     <string name="enabled">启用环境覆盖</string>
     <string name="save">保存配置</string>
     <string name="randomize">重新生成设备 ID</string>
@@ -96,4 +96,21 @@
     <string name="field_sift_app_version">Sift 应用版本</string>
     <string name="field_sift_sdk_version">Sift SDK 版本</string>
     <string name="field_battery_health">电池健康状态枚举（1..7）</string>
+    <string name="groups_9">原生与子进程环境</string>
+    <string name="groups_10">WebView 环境</string>
+    <string name="field_native_enabled">启用原生环境覆盖</string>
+    <string name="field_native_env">环境变量（每行 NAME=value，空值隐藏）</string>
+    <string name="field_native_sysname">内核系统名称</string>
+    <string name="field_native_hostname">主机名</string>
+    <string name="field_native_kernel_release">内核版本号</string>
+    <string name="field_native_kernel_version">内核构建说明</string>
+    <string name="field_native_machine">机器架构</string>
+    <string name="field_command_isolation">虚拟化 getprop 与 mount 只读查询</string>
+    <string name="field_native_mount">虚拟 mount 输出</string>
+    <string name="field_web_enabled">启用 WebView 页面脚本之前的覆盖</string>
+    <string name="field_block_web_fingerprinting">拦截 Canvas、WebGL、WebGPU 及音频指纹接口（可能影响图表或语音）</string>
+    <string name="field_web_platform">网页平台标识</string>
+    <string name="field_web_vendor">网页浏览器厂商</string>
+    <string name="field_web_device_memory">网页内存容量（GiB）</string>
+    <string name="field_web_origins">网页来源（逗号分隔，* 表示全部）</string>
 </resources>

@@ -1,0 +1,4 @@
+{
+    global: native_init; Java_io_github_lightjunction_fkclaude_NativeBridge_configure;
+    local: *;
+};

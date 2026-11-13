@@ -2,7 +2,7 @@
     <string name="app_name">fkclaude</string>
     <string name="module_description">Configurable environment for Claude</string>
     <string name="intro">Enable this module for Claude in LSPosed. Save a profile, then fully restart Claude. Settings apply only to Claude. Each field can keep its original value, be blocked, or return a custom value.</string>
-    <string name="limits">Java hooks are not a complete sandbox. Native code, WebView scripts and the public IP may still reveal the real environment. Hardware and Play Integrity proofs are not fabricated.</string>
+    <string name="limits">Native and WebView overrides cover selected interfaces. Direct system calls, files, workers and the public IP may still reveal the real environment. This is not a complete sandbox.</string>
     <string name="enabled">Enable environment overrides</string>
     <string name="save">Save profile</string>
     <string name="randomize">Regenerate device IDs</string>
@@ -96,4 +96,21 @@
     <string name="field_sift_app_version">Sift app version</string>
     <string name="field_sift_sdk_version">Sift SDK version</string>
     <string name="field_battery_health">Battery health enum, 1..7</string>
+    <string name="groups_9">Native and subprocess environment</string>
+    <string name="groups_10">WebView environment</string>
+    <string name="field_native_enabled">Enable native environment hooks</string>
+    <string name="field_native_env">Environment variables (NAME=value; empty hides)</string>
+    <string name="field_native_sysname">Kernel system name</string>
+    <string name="field_native_hostname">Reported hostname</string>
+    <string name="field_native_kernel_release">Kernel release</string>
+    <string name="field_native_kernel_version">Kernel build description</string>
+    <string name="field_native_machine">Reported machine architecture</string>
+    <string name="field_command_isolation">Virtualize read-only getprop and mount queries</string>
+    <string name="field_native_mount">Virtual mount output</string>
+    <string name="field_web_enabled">Enable document-start WebView overrides</string>
+    <string name="field_block_web_fingerprinting">Block Canvas, WebGL, WebGPU and audio fingerprint APIs (may break charts or voice)</string>
+    <string name="field_web_platform">Web platform</string>
+    <string name="field_web_vendor">Web browser vendor</string>
+    <string name="field_web_device_memory">Web device memory, GiB</string>
+    <string name="field_web_origins">Web origins (comma separated; * for all)</string>
 </resources>

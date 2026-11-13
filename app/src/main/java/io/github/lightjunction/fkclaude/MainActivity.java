@@ -100,12 +100,13 @@ public final class MainActivity extends Activity {
             mode.setAdapter(ArrayAdapter.createFromResource(this, R.array.modes, android.R.layout.simple_spinner_dropdown_item));
             section.addView(mode);
             EditText input = new EditText(this);
-            input.setSingleLine(!field.key().endsWith("properties"));
+            boolean multiline = field.key().endsWith("properties") || field.key().equals("native_env") || field.key().equals("native_mount");
+            input.setSingleLine(!multiline);
             if (field.type().equals("long")) input.setInputType(InputType.TYPE_CLASS_NUMBER);
             else if (field.type().equals("float")) input.setInputType(InputType.TYPE_CLASS_NUMBER
                     | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
             else input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                    | (field.key().endsWith("properties") ? InputType.TYPE_TEXT_FLAG_MULTI_LINE : 0));
+                    | (multiline ? InputType.TYPE_TEXT_FLAG_MULTI_LINE : 0));
             input.setText(profile.get(field.key(), ""));
             input.setTextSize(15);
             if (field.key().endsWith("_id")) input.setTypeface(android.graphics.Typeface.MONOSPACE);

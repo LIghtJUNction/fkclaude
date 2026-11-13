@@ -66,16 +66,17 @@ Sift 自定义字段在事件对象构造后覆盖；若选择自定义而没有
 | 网络类型和移动子类型 | j77 | NetworkInfo；NetworkCapabilities 传输类型 | 不改变真实路由、DNS 或代理 |
 | 屏幕像素、密度、DPI | rii0、Sentry x0:465–489 | Resources、Display metrics / size | 不覆盖全部新 WindowMetrics 路径；可能影响 UI |
 | 电量、充电、温度、健康 | v6g、Sentry x0 | 特定电池 Intent 的字段、BatteryManager；Sift jo0 字段 | 未覆盖直接读取 Bundle 或电池 native 服务的全部路径 |
-| 总内存、可用内存、CPU 数量 | Sentry x0 | ActivityManager.MemoryInfo、Runtime.availableProcessors | 不钩真实 GC 堆限制或调度器 |
-| 总存储、可用存储 | Sentry x0 | StatFs 字节与块数、File.get*Space | 不改变实际磁盘大小或可写权限 |
+| 总内存、可用内存、CPU 数量 | Sentry x0；原生 sysconf 导入 | ActivityManager.MemoryInfo、Runtime.availableProcessors；libc sysconf／sysinfo；网页 hardwareConcurrency／deviceMemory | 不钩真实 GC 堆限制或调度器 |
+| 总存储、可用存储 | Sentry x0 | StatFs 字节与块数、File.get*Space；libc statvfs／fstatvfs／statfs／fstatfs | 不改变实际磁盘大小或可写权限 |
 | 定位 | zdm、up 等 | LocationManager、Location 的坐标 getter | 阻断标准定位请求；GMS/Binder/raw parcel 尚非完整覆盖 |
 | 传感器 | SDK 接口预防性能力 | SensorManager 列表、默认传感器、注册 | 阻断模式，不生成虚假传感器流 |
 | 已安装应用列表 | Sift 字段、Sentry root 工具探测 | ApplicationPackageManager 列表过滤，Sift 事件字段 | 直接指定包名查询、Intent 查询不在普通列表过滤范围 |
 | 剪贴板、联系人、日历 | Manifest 能力与通用预防性能力 | ClipboardManager 读取、相关 ContentResolver.query | 未确认这些数据都用于风控；不包含健康服务／整个用户文件系统 |
 | Root／模拟器上下文 | Sentry util.m、q0；另有 Sift 证据链 | Sentry 对应 getter、Sift 拦截或事件自定义 | 不声称所有 Root／注入检测均被改写 |
 | 调试器 | 预防性能力 | Debug.isDebuggerConnected / waitingForDebugger | 不覆盖 native ptrace、procfs 或 JDWP 状态 |
-| Java／Android 系统属性 | Sift 直接执行 getprop；其他 SDK Java getter | 已定位 Sift 阻断；System.getProperty(s)、SystemProperties getters 自定义 | Java getter 不能改变子进程的真实 getprop 输出 |
-| WebView 用户代理 | 通用能力 | 默认 UA、WebView 实际 Settings provider getter/setter | 不伪造 WebGL、Canvas、字体、JS 全部指纹 |
+| Java／Android 系统属性 | Sift 直接执行 getprop；SDK getter 与原生导入 | System.getProperty(s)、SystemProperties；libc 三个属性读取入口；Java 发起的直接 getprop 查询 | 不改真实属性区；不覆盖 property_find／foreach 或原生启动的 getprop |
+| 原生环境、内核 | Sentry getenv／uname，SQLite getenv 导入 | Java／libc getenv、uname 五个字段；直接 mount 查询的虚拟输出 | 未配置项沿用；不修改真实挂载、内核或环境变量 |
+| WebView 环境 | 通用能力，未证明全部用于账号采集 | 文档开始脚本覆盖 navigator、screen、Intl／Date 常用时区读取、定位、UA Client Hints；可选 Canvas／WebGL／音频／设备枚举阻断 | 需要提供程序支持 DOCUMENT_START_SCRIPT；Worker、字体、WebRTC 等仍未覆盖 |
 | 遥测域名 | Sentry / CCT / Datadog 库存在 | 可配置域名后缀列表；Java DNS、URLConnection、已定位 OkHttp 执行点 | 不是系统防火墙，native/其他网络栈可能绕过 |
 
 `j77.java:84–139` 是 CCT 传输自动元数据：SDK、model、hardware、device、product、build ID、manufacturer、fingerprint、时区偏移、网络类型、子类型、语言国家、MCC/MNC、应用构建号。它属于 SDK 代码，存在不等于每次已发送。
@@ -86,7 +87,9 @@ Sentry `x0` 组装内存／存储／电池／屏幕／地区，`q0` 读取模拟
 
 每个字段独立选择沿用、拦截值或自定义；拦截值的含义由字段决定：字符串通常为空，列表为空列表，布尔诊断为 false，阻断开关为 true，时区为 UTC 等。SDK／屏幕等必须有效的值使用有效下限，界面显示具体值。
 
-隐私预设会随机生成并持久化 Claude ID 和 Android ID，固定语言／时区及局域网信息，清空运营商，阻断 Sift、定位、传感器、联系人日历和普通应用列表，配置部分遥测域名。**预设不是所有字段自动清空**：Build、SDK、屏幕与容量默认沿用，用户可自行覆盖；不因选择预设就承诺物理环境全部不可见。高级系统属性和主字段可分别设置，用户应保持自定义值一致。
+隐私预设会随机生成并持久化 Claude ID 和 Android ID，固定语言／时区及局域网信息，清空运营商，阻断 Sift、定位、传感器、联系人日历和普通应用列表，配置部分遥测域名。0.2.0 预设还启用原生、查询和 WebView 覆盖，阻断网页 Canvas／WebGL／音频和设备枚举。**预设不是所有字段自动清空**：Build、SDK、屏幕与容量默认沿用，用户可自行覆盖；不因选择预设就承诺物理环境全部不可见。
+
+共 90 个字段。主字段优先于同名高级系统属性；仅设置已知高级属性时，先映射回对应主字段，避免 Build 与属性读取相互矛盾。语言／时区同时映射到 LANG／TZ，主字段也优先于环境变量中的同名值。环境变量每行 `NAME=value`，空值表示隐藏这个变量。旧配置新增三项总开关缺省启用，Canvas 等阻断缺省关闭；重新应用隐私预设会开启。
 
 模块设置通过只读 ContentProvider 供 Claude 的 UID 与模块自身 UID 读取，其他 UID 被拒绝；修改只在模块界面进行。每个目标进程启动后读取同一份已保存配置，保持不变，配置变更需完整重启 Claude。
 
@@ -94,13 +97,14 @@ Sentry `x0` 组装内存／存储／电池／屏幕／地区，`q0` 读取模拟
 
 `native-environment-imports.json` 记录了 arm64 拆分包的实际 ELF 导入符号。`libsentry.so` 导入 `__system_property_get`、`getenv`、`uname`、`ptrace`；`libvoiceclient.so` 导入 `__system_property_get`、`sysconf`；其他图形／语音库也有系统属性接口，SQLite 有 `getenv`、`sysconf`、`readlink`。完整动态符号表保存在本地 `native/` 目录。
 
-这些是能力与潜在读取路径的证据，不是调用已执行、已上传或反调试用途的证明。例如 Sentry 的 ptrace 也可能用于崩溃处理。当前模块尚未实现这些 libc／JNI 路径的 native Hook。
+这些是能力与潜在读取路径的证据，不是调用已执行、已上传或反调试用途的证明。例如 Sentry 的 ptrace 也可能用于崩溃处理。0.2.0 已接入部分 libc Hook，具体接口、代码位置与剩余限制见[实现说明](native-web-isolation.md)；不改 ptrace。
 
 ## 仍不能称作完整隔离
 
-- 未实施独立 UID 容器、文件系统命名空间、Binder 虚拟化或 native libc Hook。
-- Java Hook 之前的静态初始化、JNI 字段读取、原生系统调用、procfs、子进程命令、WebView 独立进程可能读取真实环境。
+- 未实施独立 UID 容器、文件系统命名空间或 Binder 虚拟化；libc 覆盖是函数级适配。
+- 安装 Hook 之前的缓存、绕开 libc 的系统调用、procfs、readlink／getifaddrs、原生启动的命令及 Java 的 shell／管道仍可能读取真实环境。
+- WebView 的 Worker、CSS 字体、WebRTC、权限状态和未替换接口仍可能暴露信息；Date 本地分量构造／解析／setter 尚未虚拟化。外部浏览器和 Custom Tabs 不在页面脚本覆盖范围。
 - 公网 IP、服务器看到的连接属性、TLS 栈及账号历史不会因改 Java 字段而改变。
 - Play Integrity 和可信设备硬件密钥证明仍来自真实平台，模块不伪造证明。
 - 源码反编译仍部分不完整；定向恢复扩展了覆盖范围，但不是对全部采集能力的穷尽证明。
-- 当前只完成静态合同、构建和本地配置层验证；Claude 中每项 Hook 的实际命中、稳定性及网络效果尚未验收。
+- 当前完成静态合同、构建、本地 Java、原生适配器和 JS 隔离上下文测试；Claude 中每项 Hook 的实际命中、稳定性及网络效果尚未验收。

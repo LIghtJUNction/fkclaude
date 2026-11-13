@@ -1,0 +1,95 @@
+package io.github.lightjunction.fkclaude;
+
+public final class Schema {
+    public record Field(int group, String key, String type, String blocked, int label) {
+        public String resource() { return "field_" + key.replace('.', '_').toLowerCase(java.util.Locale.ROOT); }
+    }
+    public static final int[] GROUP_LABELS = {R.string.groups_0, R.string.groups_1, R.string.groups_2, R.string.groups_3, R.string.groups_4, R.string.groups_5, R.string.groups_6, R.string.groups_7, R.string.groups_8};
+    public static final Field[] FIELDS = {
+        new Field(0, "claude_device_id", "text", "", R.string.field_claude_device_id),
+        new Field(0, "android_id", "text", "", R.string.field_android_id),
+        new Field(0, "serial", "text", "", R.string.field_serial),
+        new Field(1, "build.MANUFACTURER", "text", "", R.string.field_build_manufacturer),
+        new Field(1, "build.BRAND", "text", "", R.string.field_build_brand),
+        new Field(1, "build.MODEL", "text", "", R.string.field_build_model),
+        new Field(1, "build.DEVICE", "text", "", R.string.field_build_device),
+        new Field(1, "build.PRODUCT", "text", "", R.string.field_build_product),
+        new Field(1, "build.BOARD", "text", "", R.string.field_build_board),
+        new Field(1, "build.HARDWARE", "text", "", R.string.field_build_hardware),
+        new Field(1, "build.BOOTLOADER", "text", "", R.string.field_build_bootloader),
+        new Field(1, "build.FINGERPRINT", "text", "", R.string.field_build_fingerprint),
+        new Field(1, "build.DISPLAY", "text", "", R.string.field_build_display),
+        new Field(1, "build.ID", "text", "", R.string.field_build_id),
+        new Field(1, "build.TAGS", "text", "", R.string.field_build_tags),
+        new Field(1, "build.TYPE", "text", "", R.string.field_build_type),
+        new Field(1, "build.USER", "text", "", R.string.field_build_user),
+        new Field(1, "build.HOST", "text", "", R.string.field_build_host),
+        new Field(1, "os_release", "text", "", R.string.field_os_release),
+        new Field(1, "security_patch", "text", "", R.string.field_security_patch),
+        new Field(1, "sdk_level", "long", "32", R.string.field_sdk_level),
+        new Field(2, "locale", "text", "en-US", R.string.field_locale),
+        new Field(2, "timezone", "text", "UTC", R.string.field_timezone),
+        new Field(3, "carrier_name", "text", "", R.string.field_carrier_name),
+        new Field(3, "sim_operator", "text", "", R.string.field_sim_operator),
+        new Field(3, "network_operator", "text", "", R.string.field_network_operator),
+        new Field(3, "sim_country", "text", "", R.string.field_sim_country),
+        new Field(3, "network_country", "text", "", R.string.field_network_country),
+        new Field(3, "wifi_ssid", "text", "", R.string.field_wifi_ssid),
+        new Field(3, "wifi_bssid", "text", "", R.string.field_wifi_bssid),
+        new Field(3, "wifi_mac", "text", "", R.string.field_wifi_mac),
+        new Field(3, "network_mac", "text", "", R.string.field_network_mac),
+        new Field(3, "local_ip", "text", "", R.string.field_local_ip),
+        new Field(3, "network_type", "long", "0", R.string.field_network_type),
+        new Field(3, "network_subtype", "long", "0", R.string.field_network_subtype),
+        new Field(3, "network_transport", "long", "1", R.string.field_network_transport),
+        new Field(3, "blocked_hosts", "text", "", R.string.field_blocked_hosts),
+        new Field(3, "user_agent", "text", "", R.string.field_user_agent),
+        new Field(4, "block_location", "bool", "true", R.string.field_block_location),
+        new Field(4, "latitude", "float", "0", R.string.field_latitude),
+        new Field(4, "longitude", "float", "0", R.string.field_longitude),
+        new Field(4, "location_accuracy", "float", "0", R.string.field_location_accuracy),
+        new Field(4, "block_sensors", "bool", "true", R.string.field_block_sensors),
+        new Field(4, "block_clipboard", "bool", "true", R.string.field_block_clipboard),
+        new Field(4, "block_personal_data", "bool", "true", R.string.field_block_personal_data),
+        new Field(4, "block_package_list", "bool", "true", R.string.field_block_package_list),
+        new Field(4, "visible_packages", "text", "", R.string.field_visible_packages),
+        new Field(5, "screen_width", "long", "1", R.string.field_screen_width),
+        new Field(5, "screen_height", "long", "1", R.string.field_screen_height),
+        new Field(5, "screen_dpi", "long", "1", R.string.field_screen_dpi),
+        new Field(5, "screen_density", "float", "1", R.string.field_screen_density),
+        new Field(5, "battery_level", "long", "0", R.string.field_battery_level),
+        new Field(5, "battery_charging", "bool", "false", R.string.field_battery_charging),
+        new Field(5, "battery_temperature", "float", "0", R.string.field_battery_temperature),
+        new Field(5, "battery_health", "long", "1", R.string.field_battery_health),
+        new Field(6, "memory_total", "long", "0", R.string.field_memory_total),
+        new Field(6, "memory_available", "long", "0", R.string.field_memory_available),
+        new Field(6, "storage_total", "long", "0", R.string.field_storage_total),
+        new Field(6, "storage_available", "long", "0", R.string.field_storage_available),
+        new Field(6, "cpu_count", "long", "1", R.string.field_cpu_count),
+        new Field(7, "debugger_connected", "bool", "false", R.string.field_debugger_connected),
+        new Field(7, "sentry_rooted", "bool", "false", R.string.field_sentry_rooted),
+        new Field(7, "sentry_emulator", "bool", "false", R.string.field_sentry_emulator),
+        new Field(7, "java_properties", "text", "", R.string.field_java_properties),
+        new Field(7, "system_properties", "text", "", R.string.field_system_properties),
+        new Field(8, "block_sift", "bool", "true", R.string.field_block_sift),
+        new Field(8, "sift_file_evidence", "text", "", R.string.field_sift_file_evidence),
+        new Field(8, "sift_package_evidence", "text", "", R.string.field_sift_package_evidence),
+        new Field(8, "sift_property_evidence", "text", "", R.string.field_sift_property_evidence),
+        new Field(8, "sift_writable_evidence", "text", "", R.string.field_sift_writable_evidence),
+        new Field(8, "sift_installed_apps", "text", "", R.string.field_sift_installed_apps),
+        new Field(8, "sift_activity", "text", "", R.string.field_sift_activity),
+        new Field(8, "sift_app_name", "text", "", R.string.field_sift_app_name),
+        new Field(8, "sift_app_version", "text", "", R.string.field_sift_app_version),
+        new Field(8, "sift_sdk_version", "text", "", R.string.field_sift_sdk_version),
+    };
+    public static boolean isKnown(String key) {
+        if (key.equals("enabled")) return true;
+        for (Field f : FIELDS) if (f.key().equals(key)) return true;
+        return false;
+    }
+    public static String type(String key) {
+        if (key.equals("enabled")) return "bool";
+        for (Field f : FIELDS) if (f.key().equals(key)) return f.type();
+        throw new IllegalArgumentException(key);
+    }
+}

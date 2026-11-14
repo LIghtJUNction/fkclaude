@@ -50,21 +50,70 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
         if (!Profile.TARGET.equals(load.packageName)) return;
         XposedHelpers.findAndHookMethod(Application.class, "attach", Context.class, new XC_MethodHook() {
             @Override protected void afterHookedMethod(MethodHookParam param) {
-                if (initialized) return;
-                initialized = true;
-                try {
-                    Context context = (Context) param.args[0];
-                    long version = context.getPackageManager().getPackageInfo(Profile.TARGET, 0).getLongVersionCode();
-                    if (version != Profile.TARGET_VERSION) { log("unsupported target version; no overrides installed"); return; }
-                    Bundle result = context.getContentResolver().call(ProfileProvider.URI, "read", null, null);
-                    if (result == null || !result.containsKey("profile")) { log("profile unavailable; no overrides installed"); return; }
-                    profile = PropertyView.normalize(Profile.parse(result.getString("profile")));
-                    if (!profile.enabled()) { log("profile disabled"); return; }
-                    install(context, load.classLoader);
-                    log("installed " + hookCount + " hooks for target version " + version + "; runtime effect unverified");
-                } catch (Throwable e) { log("initialization failed: " + e.getClass().getSimpleName()); }
+                initialize((Context) param.args[0], load.classLoader);
             }
         });
+        XposedHelpers.findAndHookMethod(android.app.Instrumentation.class, "callApplicationOnCreate", Application.class,
+                new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam param) {
+                        Application application = (Application) param.args[0];
+                        if (Profile.TARGET.equals(application.getPackageName())) initialize(application, load.classLoader);
+                    }
+                });
+    }
+
+    private void initialize(Context context, ClassLoader loader) {
+        if (initialized) return;
+        try {
+            long version = context.getPackageManager().getPackageInfo(Profile.TARGET, 0).getLongVersionCode();
+            if (version != Profile.TARGET_VERSION) { initialized = true; log("unsupported target version; no overrides installed"); return; }
+            String encoded = null;
+            try {
+                Bundle result = context.getContentResolver().call(ProfileProvider.URI, "read", null, null);
+                if (result != null) encoded = result.getString("profile");
+            } catch (IllegalArgumentException | SecurityException e) {
+                log("private provider unavailable; checking framework preferences");
+            }
+            if (encoded == null) {
+                de.robv.android.xposed.XSharedPreferences shared = new de.robv.android.xposed.XSharedPreferences(
+                        "io.github.lightjunction.fkclaude", ProfileStore.BRIDGE);
+                shared.reload();
+                encoded = shared.getString("profile", null);
+                if (encoded != null) log("configuration channel=framework preferences");
+            } else log("configuration channel=private provider");
+            if (encoded == null) { log("profile unavailable; no overrides installed"); return; }
+            profile = PropertyView.normalize(Profile.parse(encoded));
+            initialized = true; // Freeze only after configuration was actually obtained; never install twice.
+            if (!profile.enabled()) { log("profile disabled"); return; }
+            install(context, loader);
+            log("installed " + hookCount + " hooks for target version " + version);
+            selfCheck(context);
+        } catch (Throwable e) {
+            log("initialization failed: " + e.getClass().getSimpleName());
+            StackTraceElement[] frames = e.getStackTrace();
+            for (int i = 0; i < Math.min(frames.length, 4); i++) log("initialization frame: " + frames[i]);
+        }
+    }
+
+    private void selfCheck(Context context) {
+        int checks = 0, passed = 0;
+        if (profile.has("android_id")) {
+            checks++;
+            if (profile.get("android_id").equals(android.provider.Settings.Secure.getString(context.getContentResolver(), "android_id"))) passed++;
+        }
+        if (profile.has("locale")) {
+            checks++;
+            if (Locale.forLanguageTag(profile.get("locale")).equals(Locale.getDefault())) passed++;
+        }
+        if (profile.has("timezone")) {
+            checks++;
+            if (TimeZone.getTimeZone(profile.get("timezone")).getID().equals(TimeZone.getDefault().getID())) passed++;
+        }
+        for (var entry : PropertyView.environment(profile).entrySet()) {
+            checks++;
+            if (java.util.Objects.equals(entry.getValue().isEmpty() ? null : entry.getValue(), System.getenv(entry.getKey()))) passed++;
+        }
+        log("readback self-check: passed=" + passed + " checked=" + checks + "; no values logged");
     }
 
     private void install(Context context, ClassLoader loader) throws Throwable {

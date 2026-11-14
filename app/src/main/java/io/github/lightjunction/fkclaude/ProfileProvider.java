@@ -13,7 +13,11 @@ import java.util.Arrays;
 public final class ProfileProvider extends ContentProvider {
     public static final String AUTHORITY = "io.github.lightjunction.fkclaude.profile";
     public static final Uri URI = Uri.parse("content://" + AUTHORITY);
-    @Override public boolean onCreate() { return true; }
+    @Override public boolean onCreate() {
+        try { ProfileStore.load(requireContext()); }
+        catch (RuntimeException e) { android.util.Log.w("fkclaude", "Snapshot unavailable: " + e.getClass().getSimpleName()); }
+        return true;
+    }
     @Override public Bundle call(String method, String arg, Bundle extras) {
         int uid = Binder.getCallingUid();
         String[] packages = requireContext().getPackageManager().getPackagesForUid(uid);

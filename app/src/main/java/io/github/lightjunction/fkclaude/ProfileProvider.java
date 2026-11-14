@@ -26,7 +26,9 @@ public final class ProfileProvider extends ContentProvider {
         if (!"read".equals(method)) throw new UnsupportedOperationException("Read only");
         Profile profile;
         try { profile = ProfileStore.load(requireContext()); }
-        catch (IllegalArgumentException e) { profile = new Profile(java.util.Map.of("enabled", "false")); }
+        catch (IllegalArgumentException e) {
+            Bundle invalid = new Bundle(); invalid.putBoolean("profile_invalid", true); return invalid;
+        }
         Bundle result = new Bundle();
         result.putString("profile", profile.encode());
         return result;

@@ -145,7 +145,8 @@ def main():
             if defined and binding >> 4 in (1, 2) and visibility & 3 in (0, 3) and name:
                 start = strings[4] + name
                 exports.add(native[start:native.index(b"\0", start)].decode())
-    assert exports == {"native_init", "Java_io_github_lightjunction_fkclaude_NativeBridge_configure"}, exports
+    assert exports == {"native_init", "Java_io_github_lightjunction_fkclaude_NativeBridge_configure"} | {
+        "Java_io_github_lightjunction_fkclaude_IpGuard_" + name for name in ("nativeStart", "nativeBlock", "nativePermit", "nativeProbe")}, exports
     with module.open("rb") as binary:
         binary.seek(info.header_offset)
         local = binary.read(30)

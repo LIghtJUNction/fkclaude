@@ -113,4 +113,10 @@
     <string name="field_web_vendor">Web browser vendor</string>
     <string name="field_web_device_memory">Web device memory, GiB</string>
     <string name="field_web_origins">Web origins (comma separated; * for all)</string>
+    <string name="groups_11">IP allowlist guard</string>
+    <string name="field_ip_guard_enabled">Enable IP allowlist guard (independent switch)</string>
+    <string name="field_ip_guard_cidrs">Allowed public IPs / CIDRs (one per line)</string>
+    <string name="field_ip_guard_probe_url">Trusted HTTPS IP echo URL</string>
+    <string name="field_ip_guard_interval">Recheck interval in seconds (1–5)</string>
+    <string name="ip_guard_note">IP guard has its own switch. When enabled, an empty list, failed verification or nonmatching IP blocks Claude. IPv4 and IPv6 are checked separately; network changes revoke approval. Supports default routes and VPN/TUN. Explicit HTTP/SOCKS proxies remain blocked. Unreadable configuration or unavailable native enforcement stops Claude. Polling is not instantaneous and this is not a system firewall. Applying the preset preserves saved IDs and IP guard rules.</string>
 </resources>

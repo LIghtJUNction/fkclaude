@@ -1,4 +1,8 @@
 {
     global: native_init; Java_io_github_lightjunction_fkclaude_NativeBridge_configure;
+        Java_io_github_lightjunction_fkclaude_IpGuard_nativeStart;
+        Java_io_github_lightjunction_fkclaude_IpGuard_nativeBlock;
+        Java_io_github_lightjunction_fkclaude_IpGuard_nativePermit;
+        Java_io_github_lightjunction_fkclaude_IpGuard_nativeProbe;
     local: *;
 };

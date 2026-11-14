@@ -1,4 +1,5 @@
 #include "native_api.hpp"
+#include "ip_guard.hpp"
 #include "native_config.hpp"
 #include <atomic>
 #include <cerrno>
@@ -206,7 +207,7 @@ Report activate(const std::uint8_t* data, std::size_t size) {
 
 extern "C" __attribute__((visibility("default"), used))
 LibraryLoaded native_init(const NativeAPIEntries* entries) {
-    if (entries) hook_function = entries->hook_func;
+    if (entries) { hook_function = entries->hook_func; fkclaude::ip_guard::set_hook_function(entries->hook_func); }
     return library_loaded;
 }
 extern "C" JNIEXPORT jlongArray JNICALL

@@ -65,13 +65,19 @@ public final class Profile {
     }
 
     public static Profile defaults() {
+        return defaults(null);
+    }
+
+    /** Applying the preset never changes an existing identity or weakens an enabled IP guard. */
+    public static Profile defaults(Profile existing) {
         Map<String, String> map = new HashMap<>();
         map.put("enabled", "true");
         randomize(map);
-        map.put("locale", "en-US");
-        map.put("timezone", "UTC");
         map.put("native_enabled", "true"); map.put("command_isolation", "true"); map.put("web_enabled", "true");
-        map.put("block_web_fingerprinting", "true");
+        map.put("block_web_fingerprinting", "false");
+        map.put("ip_guard_enabled", "false");
+        map.put("ip_guard_probe_url", IpGuardDefaults.PROBE);
+        map.put("ip_guard_interval", "3");
         for (String key : new String[]{"block_sensors", "block_location", "block_personal_data", "block_package_list", "block_sift"})
             map.put(key, "true");
         for (String key : new String[]{"carrier_name", "sim_operator", "network_operator", "sim_country", "network_country"})
@@ -79,7 +85,7 @@ public final class Profile {
         map.put("wifi_ssid", "<unknown ssid>");
         map.put("wifi_bssid", "02:00:00:00:00:00");
         map.put("wifi_mac", "02:00:00:00:00:00");
-        map.put("local_ip", "192.0.2.2");
+        map.put("local_ip", "");
         map.put("network_mac", "02:00:00:00:00:00");
         // Browser intake hosts are hyphenated, not subdomains of datadoghq.com (q8g in the sample).
         map.put("blocked_hosts", "sentry.io,datadoghq.com,datadoghq.eu,"
@@ -88,6 +94,10 @@ public final class Profile {
                 + "browser-intake-ap1-datadoghq.com,browser-intake-ap2-datadoghq.com,browser-intake-uk1-datadoghq.com,"
                 + "browser-intake-ddog-gov.com,browser-intake-us2-ddog-gov.com,browser-intake-datad0g.com,"
                 + "firebaselogging.googleapis.com,firebaselogging-pa.googleapis.com,app-measurement.com");
+        if (existing != null) {
+            for (String key : new String[]{"claude_device_id", "android_id"}) if (existing.has(key)) map.put(key, existing.get(key));
+            existing.copy().forEach((key, value) -> { if (key.startsWith("ip_guard_")) map.put(key, value); });
+        }
         return new Profile(map);
     }
 
@@ -158,6 +168,10 @@ public final class Profile {
                 && Long.parseLong(value) > Integer.MAX_VALUE) throw new IllegalArgumentException("Integer overflow");
         if (key.equals("network_transport") && Long.parseLong(value) > 10) throw new IllegalArgumentException("network_transport");
         if (key.equals("location_accuracy") && Float.parseFloat(value) < 0) throw new IllegalArgumentException("location_accuracy");
+        if (key.equals("ip_guard_cidrs")) new IpAllowlist(value);
+        if (key.equals("ip_guard_probe_url")) ProbeResponse.endpoint(value);
+        if (key.equals("ip_guard_interval") && (Long.parseLong(value) < 1 || Long.parseLong(value) > 5))
+            throw new IllegalArgumentException("ip_guard_interval: 1..5 seconds");
         if (key.equals("web_device_memory") && (Float.parseFloat(value) < 0 || Float.parseFloat(value) > 1024))
             throw new IllegalArgumentException("web_device_memory");
         if (Set.of("native_sysname", "native_hostname", "native_kernel_release", "native_kernel_version", "native_machine").contains(key)

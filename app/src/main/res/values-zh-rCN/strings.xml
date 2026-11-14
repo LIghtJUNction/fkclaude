@@ -113,4 +113,10 @@
     <string name="field_web_vendor">网页浏览器厂商</string>
     <string name="field_web_device_memory">网页内存容量（GiB）</string>
     <string name="field_web_origins">网页来源（逗号分隔，* 表示全部）</string>
+    <string name="groups_11">IP 白名单守卫</string>
+    <string name="field_ip_guard_enabled">启用 IP 白名单守卫（独立开关）</string>
+    <string name="field_ip_guard_cidrs">允许的公网 IP／CIDR（每行一条）</string>
+    <string name="field_ip_guard_probe_url">可信的 HTTPS 出口 IP 回显地址</string>
+    <string name="field_ip_guard_interval">复查间隔秒数（1–5）</string>
+    <string name="ip_guard_note">IP 守卫使用独立开关。开启后，名单为空、校验失败或 IP 不匹配均阻断 Claude。IPv4／IPv6 分开核验，网络变化撤销许可。支持默认路由／VPN，显式 HTTP/SOCKS 代理保持阻断。配置无法读取或原生拦截不可用时停止 Claude。轮询不是零延迟，也不是系统防火墙。应用预设保留已保存的 ID 和守卫规则。</string>
 </resources>

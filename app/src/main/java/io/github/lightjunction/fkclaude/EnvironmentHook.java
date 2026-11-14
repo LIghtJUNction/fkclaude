@@ -49,6 +49,9 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam load) throws Throwable {
         if (!Profile.TARGET.equals(load.packageName)) return;
         XposedHelpers.findAndHookMethod(Application.class, "attach", Context.class, new XC_MethodHook() {
+            @Override protected void beforeHookedMethod(MethodHookParam param) {
+                initialize((Context) param.args[0], load.classLoader);
+            }
             @Override protected void afterHookedMethod(MethodHookParam param) {
                 initialize((Context) param.args[0], load.classLoader);
             }
@@ -66,7 +69,6 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
         if (initialized) return;
         try {
             long version = context.getPackageManager().getPackageInfo(Profile.TARGET, 0).getLongVersionCode();
-            if (version != Profile.TARGET_VERSION) { initialized = true; log("unsupported target version; no overrides installed"); return; }
             String encoded = null;
             try {
                 Bundle result = context.getContentResolver().call(ProfileProvider.URI, "read", null, null);
@@ -81,10 +83,12 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
                 encoded = shared.getString("profile", null);
                 if (encoded != null) log("configuration channel=framework preferences");
             } else log("configuration channel=private provider");
-            if (encoded == null) { log("profile unavailable; no overrides installed"); return; }
+            if (encoded == null) throw new IllegalStateException("Profile unavailable");
             profile = PropertyView.normalize(Profile.parse(encoded));
             initialized = true; // Freeze only after configuration was actually obtained; never install twice.
-            if (!profile.enabled()) { log("profile disabled"); return; }
+            IpGuard.install(context, profile);
+            if (version != Profile.TARGET_VERSION) { log("unsupported environment version; IP guard remains independent"); return; }
+            if (!profile.enabled()) { log("environment disabled; IP guard remains independent"); return; }
             install(context, loader);
             log("installed " + hookCount + " hooks for target version " + version);
             selfCheck(context);
@@ -92,6 +96,8 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             log("initialization failed: " + e.getClass().getSimpleName());
             StackTraceElement[] frames = e.getStackTrace();
             for (int i = 0; i < Math.min(frames.length, 4); i++) log("initialization frame: " + frames[i]);
+            // Policy read/initialization failure must not silently bypass a possibly enabled guard.
+            android.os.Process.killProcess(android.os.Process.myPid());
         }
     }
 

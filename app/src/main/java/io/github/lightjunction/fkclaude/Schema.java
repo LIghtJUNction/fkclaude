@@ -4,7 +4,7 @@ public final class Schema {
     public record Field(int group, String key, String type, String blocked, int label) {
         public String resource() { return "field_" + key.replace('.', '_').toLowerCase(java.util.Locale.ROOT); }
     }
-    public static final int[] GROUP_LABELS = {R.string.groups_0, R.string.groups_1, R.string.groups_2, R.string.groups_3, R.string.groups_4, R.string.groups_5, R.string.groups_6, R.string.groups_7, R.string.groups_8, R.string.groups_9, R.string.groups_10};
+    public static final int[] GROUP_LABELS = {R.string.groups_0, R.string.groups_1, R.string.groups_2, R.string.groups_3, R.string.groups_4, R.string.groups_5, R.string.groups_6, R.string.groups_7, R.string.groups_8, R.string.groups_9, R.string.groups_10, R.string.groups_11};
     public static final Field[] FIELDS = {
         new Field(0, "claude_device_id", "text", "", R.string.field_claude_device_id),
         new Field(0, "android_id", "text", "", R.string.field_android_id),
@@ -96,6 +96,10 @@ public final class Schema {
         new Field(10, "web_vendor", "text", "", R.string.field_web_vendor),
         new Field(10, "web_device_memory", "float", "0", R.string.field_web_device_memory),
         new Field(10, "web_origins", "text", "*", R.string.field_web_origins),
+        new Field(11, "ip_guard_enabled", "bool", "true", R.string.field_ip_guard_enabled),
+        new Field(11, "ip_guard_cidrs", "text", "", R.string.field_ip_guard_cidrs),
+        new Field(11, "ip_guard_probe_url", "text", "https://claude.ai/cdn-cgi/trace", R.string.field_ip_guard_probe_url),
+        new Field(11, "ip_guard_interval", "long", "3", R.string.field_ip_guard_interval),
     };
     public static boolean isKnown(String key) {
         if (key.equals("enabled")) return true;

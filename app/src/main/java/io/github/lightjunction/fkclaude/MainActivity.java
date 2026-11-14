@@ -67,10 +67,11 @@ public final class MainActivity extends Activity {
             }
             toast(R.string.edited);
         });
-        button(actions, R.string.preset, v -> { render(Profile.defaults()); toast(R.string.edited); });
+        button(actions, R.string.preset, v -> { render(Profile.defaults(profile)); toast(R.string.edited); });
         root.addView(actions);
         root.addView(text(getString(R.string.limits)));
         root.addView(text(getString(R.string.build_note)));
+        root.addView(text(getString(R.string.ip_guard_note)));
         int group = -1;
         LinearLayout section = null;
         for (Schema.Field field : Schema.FIELDS) {
@@ -100,7 +101,7 @@ public final class MainActivity extends Activity {
             mode.setAdapter(ArrayAdapter.createFromResource(this, R.array.modes, android.R.layout.simple_spinner_dropdown_item));
             section.addView(mode);
             EditText input = new EditText(this);
-            boolean multiline = field.key().endsWith("properties") || field.key().equals("native_env") || field.key().equals("native_mount");
+            boolean multiline = field.key().endsWith("properties") || field.key().equals("native_env") || field.key().equals("native_mount") || field.key().equals("ip_guard_cidrs");
             input.setSingleLine(!multiline);
             if (field.type().equals("long")) input.setInputType(InputType.TYPE_CLASS_NUMBER);
             else if (field.type().equals("float")) input.setInputType(InputType.TYPE_CLASS_NUMBER

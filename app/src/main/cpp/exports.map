@@ -4,5 +4,8 @@
         Java_io_github_lightjunction_fkclaude_IpGuard_nativeBlock;
         Java_io_github_lightjunction_fkclaude_IpGuard_nativePermit;
         Java_io_github_lightjunction_fkclaude_IpGuard_nativeProbe;
+        Java_io_github_lightjunction_fkclaude_AuditNative_nativeInstall;
+        Java_io_github_lightjunction_fkclaude_AuditNative_nativeSetEnabled;
+        Java_io_github_lightjunction_fkclaude_AuditNative_nativeDrain;
     local: *;
 };

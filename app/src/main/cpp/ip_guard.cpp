@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "ip_guard.hpp"
+#include "network_audit.hpp"
 #include <jni.h>
 #include <arpa/inet.h>
 #include <cerrno>
@@ -171,7 +172,11 @@ Sendmsg original_sendmsg = nullptr;
 Sendmmsg original_sendmmsg = nullptr;
 Gai original_gai = nullptr;
 int guarded_connect(int fd, const sockaddr* a, socklen_t n) {
-    if (!allow(fd, a, n)) return -1;
+    network_audit::Scope scope;
+    if (!allow(fd, a, n)) {
+        if (scope.outer()) network_audit::observe(fd, network_audit::Operation::Connect, -1, errno, a, n, true);
+        return -1;
+    }
     int saved = errno;
     remember_probe(fd); // Register before connect can race with a shutdown sweep.
     errno = saved;
@@ -180,32 +185,61 @@ int guarded_connect(int fd, const sockaddr* a, socklen_t n) {
     if (!local_probe.depth && !allow(fd, a, n)) {
         shutdown(fd, SHUT_RDWR);
         errno = EACCES;
+        if (scope.outer()) network_audit::observe(fd, network_audit::Operation::Connect, -1, errno, a, n, true);
         return -1;
     }
     errno = saved;
+    if (scope.outer()) network_audit::observe(fd, network_audit::Operation::Connect, result, errno, a, n);
     return result;
 }
 ssize_t guarded_send(int fd, const void* b, size_t n, int flags) {
-    if (!allow(fd)) return -1;
-    return original_send(fd, b, n, flags);
+    network_audit::Scope scope;
+    if (!allow(fd)) {
+        if (scope.outer()) network_audit::observe(fd, network_audit::Operation::Send, -1, errno, nullptr, 0, true);
+        return -1;
+    }
+    auto result = original_send(fd, b, n, flags);
+    if (scope.outer()) network_audit::observe(fd, network_audit::Operation::Send, result, errno);
+    return result;
 }
 ssize_t guarded_sendto(int fd, const void* b, size_t n, int flags, const sockaddr* a, socklen_t len) {
-    if (!allow(fd, a, len)) return -1;
-    return original_sendto(fd, b, n, flags, a, len);
+    network_audit::Scope scope;
+    if (!allow(fd, a, len)) {
+        if (scope.outer()) network_audit::observe(fd, network_audit::Operation::Sendto, -1, errno, a, len, true);
+        return -1;
+    }
+    auto result = original_sendto(fd, b, n, flags, a, len);
+    if (scope.outer()) network_audit::observe(fd, network_audit::Operation::Sendto, result, errno, a, len);
+    return result;
 }
 bool allow_message(int fd, const msghdr* m) {
     return allow(fd, m ? static_cast<const sockaddr*>(m->msg_name) : nullptr,
                  m ? m->msg_namelen : 0);
 }
 ssize_t guarded_sendmsg(int fd, const msghdr* m, int flags) {
-    if (!allow_message(fd, m)) return -1;
-    return original_sendmsg(fd, m, flags);
+    network_audit::Scope scope;
+    if (!allow_message(fd, m)) {
+        if (scope.outer()) network_audit::observe_message(fd, network_audit::Operation::Sendmsg, -1, errno, m, true);
+        return -1;
+    }
+    auto result = original_sendmsg(fd, m, flags);
+    if (scope.outer()) network_audit::observe_message(fd, network_audit::Operation::Sendmsg, result, errno, m);
+    return result;
 }
 int guarded_sendmmsg(int fd, mmsghdr* m, unsigned count, int flags) {
-    if ((!m || !count) && !allow(fd)) return -1;
+    network_audit::Scope scope;
+    if ((!m || !count) && !allow(fd)) {
+        if (scope.outer()) network_audit::observe_messages(fd, -1, errno, m, count, true);
+        return -1;
+    }
     for (unsigned i = 0; m && i < count && i < 1024; ++i)
-        if (!allow_message(fd, &m[i].msg_hdr)) return -1;
-    return original_sendmmsg(fd, m, count, flags);
+        if (!allow_message(fd, &m[i].msg_hdr)) {
+            if (scope.outer()) network_audit::observe_messages(fd, -1, errno, m, count, true);
+            return -1;
+        }
+    auto result = original_sendmmsg(fd, m, count, flags);
+    if (scope.outer()) network_audit::observe_messages(fd, result, errno, m, count);
+    return result;
 }
 int guarded_gai(const char* node, const char* service, const addrinfo* hints, addrinfo** out) {
     auto& s = state();
@@ -291,6 +325,7 @@ std::int64_t permit_checked(int family, int ttl_ms, std::int64_t observation_dea
 }
 void permit(int family, int ttl_ms) { (void) permit_checked(family, ttl_ms, INT64_MAX); }
 void probe(bool enter) {
+    network_audit::probe(enter);
     if (enter) { if (local_probe.depth != UINT_MAX) ++local_probe.depth; }
     else if (local_probe.depth && --local_probe.depth == 0) local_probe.clear();
 }

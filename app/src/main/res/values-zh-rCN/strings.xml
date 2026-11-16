@@ -119,4 +119,8 @@
     <string name="field_ip_guard_probe_url">可信的 HTTPS 出口 IP 回显地址</string>
     <string name="field_ip_guard_interval">复查间隔秒数（1–5）</string>
     <string name="ip_guard_note">IP 守卫使用独立开关。开启后，名单为空、校验失败或 IP 不匹配均阻断 Claude。IPv4／IPv6 分开核验，网络变化撤销许可。支持默认路由／VPN，显式 HTTP/SOCKS 代理保持阻断。配置无法读取或原生拦截不可用时停止 Claude。轮询不是零延迟，也不是系统防火墙。应用预设保留已保存的 ID 和守卫规则。</string>
+    <string name="audit_open">打开 Claude 行为审计</string>
+    <string name="audit_entry_note">在 Claude 内搜索、分类浏览本地脱敏记录。记录开关独立于环境覆盖；升级模块后请重启 Claude。</string>
+    <string name="audit_not_installed">尚未安装 Claude。</string>
+    <string name="audit_open_error">暂时无法打开 Claude，请检查应用是否已启用。</string>
 </resources>

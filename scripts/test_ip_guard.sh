@@ -8,6 +8,6 @@ trap 'rm -rf -- "$build_dir"' EXIT
   -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie \
   -DFKCLAUDE_HOST_TEST -pthread \
   -I"$root/app/src/main/cpp" -I"$java_home/include" -I"$java_home/include/linux" \
-  "$root/app/src/main/cpp/ip_guard.cpp" "$root/tests/ip_guard_test.cpp" \
+  "$root/app/src/main/cpp/ip_guard.cpp" "$root/app/src/main/cpp/network_audit.cpp" "$root/tests/ip_guard_test.cpp" \
   -ldl -o "$build_dir/ip_guard_test"
 ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=halt_on_error=1 "$build_dir/ip_guard_test"

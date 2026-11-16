@@ -54,6 +54,11 @@ public final class MainActivity extends Activity {
         enabled.setText(R.string.enabled);
         enabled.setChecked(profile.enabled());
         root.addView(enabled);
+        Button audit = new Button(this);
+        audit.setText(R.string.audit_open);
+        audit.setOnClickListener(v -> openAudit());
+        root.addView(audit);
+        root.addView(text(getString(R.string.audit_entry_note)));
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.VERTICAL);
         button(actions, R.string.save, v -> save());
@@ -140,6 +145,15 @@ public final class MainActivity extends Activity {
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
             return insets;
         });
+    }
+
+    private void openAudit() {
+        android.content.Intent launch = getPackageManager().getLaunchIntentForPackage(Profile.TARGET);
+        if (launch == null) { toast(R.string.audit_not_installed); return; }
+        launch.putExtra(AuditPanel.OPEN_EXTRA, true);
+        launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK | android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        try { startActivity(launch); }
+        catch (RuntimeException unavailable) { toast(R.string.audit_open_error); }
     }
 
     private Profile collect() {

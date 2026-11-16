@@ -119,4 +119,8 @@
     <string name="field_ip_guard_probe_url">Trusted HTTPS IP echo URL</string>
     <string name="field_ip_guard_interval">Recheck interval in seconds (1–5)</string>
     <string name="ip_guard_note">IP guard has its own switch. When enabled, an empty list, failed verification or nonmatching IP blocks Claude. IPv4 and IPv6 are checked separately; network changes revoke approval. Supports default routes and VPN/TUN. Explicit HTTP/SOCKS proxies remain blocked. Unreadable configuration or unavailable native enforcement stops Claude. Polling is not instantaneous and this is not a system firewall. Applying the preset preserves saved IDs and IP guard rules.</string>
+    <string name="audit_open">Open Claude audit</string>
+    <string name="audit_entry_note">Browse local, redacted events inside Claude. The audit panel has its own recording switch, independent of environment overrides. Restart Claude after upgrading this module.</string>
+    <string name="audit_not_installed">Claude is not installed.</string>
+    <string name="audit_open_error">Unable to open Claude. Check that it is enabled.</string>
 </resources>

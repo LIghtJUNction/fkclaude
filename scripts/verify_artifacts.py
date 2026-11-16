@@ -102,7 +102,8 @@ def main():
         assert contract in methods, ("Missing method contract", contract)
     field_contracts = [("Ls2h;", "a", string), ("Lv6g;", "r", obj),
                        ("Lko10;", "b", "Lbj30;"), ("Lbj30;", "a", "Lo6n;"),
-                       ("Lo6n;", "d", string), ("Ldpf0;", "a", "Ldpf0;")]
+                       ("Lo6n;", "d", string), ("Ldpf0;", "a", "Ldpf0;"),
+                       ("Lbj30;", "b", string), ("Lbj30;", "d", "Lrj30;"), ("Lw040;", "d", "I")]
     field_contracts += [("Let0;", name, string) for name in "abcdefghij"]
     field_contracts += [("Let0;", name, "Ljava/util/List;") for name in "klmno"]
     field_contracts += [("Ljo0;", name, typ) for name, typ in
@@ -123,6 +124,7 @@ def main():
         assert apk.read("assets/xposed_init").decode().strip() == "io.github.lightjunction.fkclaude.EnvironmentHook"
         assert apk.read("assets/native_init").decode().strip() == "libfkclaude.so"
         assert apk.read("assets/environment.js") == (ROOT / "app/src/main/assets/environment.js").read_bytes()
+        assert apk.read("assets/audit.js") == (ROOT / "app/src/main/assets/audit.js").read_bytes()
         assert [n for n in apk.namelist() if n.endswith(".so")] == ["lib/arm64-v8a/libfkclaude.so"]
         native = apk.read("lib/arm64-v8a/libfkclaude.so")
         info = apk.getinfo("lib/arm64-v8a/libfkclaude.so")
@@ -146,7 +148,8 @@ def main():
                 start = strings[4] + name
                 exports.add(native[start:native.index(b"\0", start)].decode())
     assert exports == {"native_init", "Java_io_github_lightjunction_fkclaude_NativeBridge_configure"} | {
-        "Java_io_github_lightjunction_fkclaude_IpGuard_" + name for name in ("nativeStart", "nativeBlock", "nativePermit", "nativeProbe")}, exports
+        "Java_io_github_lightjunction_fkclaude_IpGuard_" + name for name in ("nativeStart", "nativeBlock", "nativePermit", "nativeProbe")} | {
+        "Java_io_github_lightjunction_fkclaude_AuditNative_" + name for name in ("nativeInstall", "nativeSetEnabled", "nativeDrain")}, exports
     with module.open("rb") as binary:
         binary.seek(info.header_offset)
         local = binary.read(30)
@@ -155,6 +158,8 @@ def main():
     assert (info.header_offset + 30 + name_size + extra_size) % 16384 == 0, "APK native library alignment below 16 KiB"
     module_classes = set().union(*(d.classes for d in read_apk(module)))
     assert "Lio/github/lightjunction/fkclaude/EnvironmentHook;" in module_classes
+    for name in ("AuditHooks", "AuditLog", "AuditPanel", "AuditNative", "AuditWeb"):
+        assert "Lio/github/lightjunction/fkclaude/" + name + ";" in module_classes
     assert not any(n.startswith("Lde/robv/android/xposed/") for n in module_classes), "Framework API bundled in APK"
     result = {"dex_method_contracts": len(contracts), "dex_field_contracts": len(field_contracts),
               "configurable_fields": len(keys), "locales_complete": ["en", "zh-CN"],

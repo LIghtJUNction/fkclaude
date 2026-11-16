@@ -69,6 +69,7 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
         if (initialized) return;
         try {
             long version = context.getPackageManager().getPackageInfo(Profile.TARGET, 0).getLongVersionCode();
+            AuditHooks.install(context, loader, version, modulePath);
             String encoded = null;
             try {
                 Bundle result = context.getContentResolver().call(ProfileProvider.URI, "read", null, null);
@@ -87,6 +88,10 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             profile = PropertyView.normalize(Profile.parse(encoded));
             initialized = true; // Freeze only after configuration was actually obtained; never install twice.
             IpGuard.install(context, profile);
+            AuditNative.install(profile.flag("ip_guard_enabled"));
+            AuditLog.record("system", "environment_policy", "EnvironmentHook", "observed",
+                    Map.of("phase", profile.enabled() ? "modified_environment" : "environment_disabled",
+                            "reason", "sift_block=" + profile.flag("block_sift") + ";ip_guard=" + profile.flag("ip_guard_enabled")));
             if (version != Profile.TARGET_VERSION) { log("unsupported environment version; IP guard remains independent"); return; }
             if (!profile.enabled()) { log("environment disabled; IP guard remains independent"); return; }
             install(context, loader);
@@ -501,12 +506,19 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             // v6g is R8-merged with unrelated coroutines: guard the captured receiver's exact type.
             hook("v6g", loader, "invokeSuspend", true, p -> {
                 Object receiver = XposedHelpers.getObjectField(p.thisObject, "r");
-                if (receiver != null && receiver.getClass().getName().equals("h2a0"))
+                if (receiver != null && receiver.getClass().getName().equals("h2a0")) {
+                    AuditHooks.blocked("telemetry", "sift_collect", "v6g#invokeSuspend", "profile.block_sift");
                     p.setResult(XposedHelpers.getStaticObjectField(XposedHelpers.findClass("dpf0", loader), "a"));
+                }
             });
-            hook("h2a0", loader, "b", true, p -> p.setResult(null)); // verified void event queue entry
-            hook("g2a0", loader, "invokeSuspend", true, p ->
-                    p.setResult(XposedHelpers.getStaticObjectField(XposedHelpers.findClass("dpf0", loader), "a")));
+            hook("h2a0", loader, "b", true, p -> {
+                AuditHooks.blocked("telemetry", "sift_queue", "h2a0#b", "profile.block_sift");
+                p.setResult(null);
+            }); // verified void event queue entry
+            hook("g2a0", loader, "invokeSuspend", true, p -> {
+                AuditHooks.blocked("telemetry", "sift_dispatch", "g2a0#invokeSuspend", "profile.block_sift");
+                p.setResult(XposedHelpers.getStaticObjectField(XposedHelpers.findClass("dpf0", loader), "a"));
+            });
         }
         String[][] evidence = {{"k", "sift_file_evidence"}, {"l", "sift_package_evidence"},
                 {"m", "sift_property_evidence"}, {"n", "sift_writable_evidence"}, {"o", "sift_installed_apps"}};
@@ -557,8 +569,10 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
         if (profile.get("blocked_hosts", "").isBlank() && !profile.flag("block_sift")) return;
         for (String method : new String[]{"getByName", "getAllByName"})
             hook("java.net.InetAddress", loader, method, true, p -> {
-                if (p.args.length > 0 && p.args[0] instanceof String host && profile.blocksHost(host))
+                if (p.args.length > 0 && p.args[0] instanceof String host && profile.blocksHost(host)) {
+                    AuditLog.record("network", "dns_lookup", "EnvironmentHook", "blocked", Map.of("host", host, "reason", "profile.blocked_hosts"));
                     p.setThrowable(new UnknownHostException("Blocked by fkclaude profile"));
+                }
             });
         // Both synchronous and async calls reach ko10.f() in the analyzed build.
         hook("ko10", loader, "f", true, p -> {
@@ -566,13 +580,19 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             Object url = XposedHelpers.getObjectField(request, "a");
             String host = (String) XposedHelpers.getObjectField(url, "d");
             String path = (String) XposedHelpers.callMethod(url, "b");
-            if (profile.blocksHost(host) || (profile.flag("block_sift") && path.matches("/v3/accounts/[^/]+/mobile_events")))
+            if (profile.blocksHost(host) || (profile.flag("block_sift") && path.matches("/v3/accounts/[^/]+/mobile_events"))) {
+                AuditLog.record(AuditClassifier.category("UNKNOWN", host, path), "http_request", "EnvironmentHook", "blocked",
+                        Map.of("host", host, "path", path, "reason", "profile.outbound_policy"));
                 p.setThrowable(new IOException("Blocked by fkclaude profile"));
+            }
         });
         hook("java.net.URL", loader, "openConnection", true, p -> {
             java.net.URL url = (java.net.URL) p.thisObject;
-            if (profile.blocksHost(url.getHost()) || (profile.flag("block_sift") && url.getPath().matches("/v3/accounts/[^/]+/mobile_events")))
+            if (profile.blocksHost(url.getHost()) || (profile.flag("block_sift") && url.getPath().matches("/v3/accounts/[^/]+/mobile_events"))) {
+                AuditLog.record(AuditClassifier.category("UNKNOWN", url.getHost(), url.getPath()), "connection_created", "EnvironmentHook", "blocked",
+                        Map.of("url", url.toString(), "reason", "profile.outbound_policy"));
                 p.setThrowable(new IOException("Blocked by fkclaude profile"));
+            }
         });
     }
     private static void log(String message) { XposedBridge.log("fkclaude: " + message); }

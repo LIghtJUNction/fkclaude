@@ -1,6 +1,6 @@
 # Claude Android 非对话采集与上传：静态证据报告
 
-审查日期：2026-11-17（Asia/Taipei）。样本为用户设备上已安装的 `com.anthropic.claude` **1.261112.18 / 26111218**。本报告记录安装包分析与官方披露核验；本轮实机日志、安装和弹窗验收由运行验证记录单独提供。
+审查日期：2026-11-17（Asia/Taipei）。样本为用户设备上已安装的 `com.anthropic.claude` **1.261112.18 / 26111218**。本报告记录安装包分析与官方披露核验；本轮实机日志、安装和弹窗的状态见 [0.4.0 验证记录](validation-0.4.0.md)。
 
 ## 1. 已确认的核心结论
 
@@ -120,6 +120,18 @@ Manifest 的 `io.sentry.auto-init=false` 关闭 SDK 的自动初始化入口。C
 不要为日志复放 `rj30.e(b16)`：它是写出请求体的接口，复放可能重复读取一次性流或改变应用行为。不要对未知对象调用 `toString()` 作为“方便的详情”，它可能包含账号、请求正文、Cookie 或令牌。
 
 Java HTTP Hook 的覆盖还需要与 URLConnection、WebView、Cronet／QUIC 和原生 socket 分别核算。原生传输只能给出地址／端口和字节等低层事实时，应保留“协议／用途未知”；TLS 密文长度不足以恢复上传字段。
+
+### 原生网络观察的实现与解释
+
+本轮审计实现还在 libc 层观察 Internet socket 的 `connect`、`send`、`sendto`、`sendmsg`、`sendmmsg`、`write` 和 `writev`。IP 守卫启用时，前五项复用它的现有 wrapper，避免重复安装同一 hook；嵌套调用共享线程级标记，避免一次 libc 发送被多层重复计数。
+
+原生事件只含目的 IP／端口、地址族、socket 类型、操作、文件描述符、调用返回值、errno、字节数量及捕获时间／线程。普通文件和 Unix IPC 被忽略；不读取缓冲区内容，不记录本机源地址。目的 IP 以 `peer_address` 保存供网络去向审计，和用户设备标识分开处理。
+
+队列固定为 512 条，Java 后台线程每 500 ms 最多拉取 128 条；队列满、并发竞争或超大 `sendmmsg` 批次的省略记录计入显式 dropped 事件。`sendmmsg` 每次最多保留 16 条成功消息的字节元数据。暂停同步停用原生记录并清空待处理队列，Java 批次代数阻止暂停再开启后混入旧批次。
+
+`native_elapsed_ms` 和 `native_thread_id` 保留原始捕获时刻和调用线程；顶层时间表示 Java 接收该条记录的时间。`bytes` 表示 socket 调用接受的字节，TLS／QUIC 加密层和重试会改变它与业务正文长度的关系。它不表示服务端已经保存数据，不能和 HTTP 层计数相加后当成总上传量。IP 守卫的探测线程明确标记为 `fkclaude_ip_guard_probe`／`instrumentation`。
+
+原生记录不解密 TLS／QUIC，也不由 IP 猜测上传字段。其他 UID／未注入进程、直接系统调用、`sendfile`／`splice` 等未覆盖传输接口保留为覆盖边界。Host 测试使用假的 inline-hook 安装器调用真实 wrapper，已验证 TCP／UDP／IPv6、errno 和返回保持、payload 原样传递、普通文件／IPC 忽略、失败指针安全、队列上限、暂停及 IP 守卫共存；真实 Android inline patching 由设备验收单独确认。
 
 ## 7. 日志如何支撑结论
 

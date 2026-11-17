@@ -1,4 +1,6 @@
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -148,6 +150,27 @@ class AuditLogAnalysisTest(unittest.TestCase):
         self.assertEqual(1, report["input"]["unique_valid_events"])
         self.assertEqual(1, report["input"]["duplicate_files_ignored"])
         self.assertTrue(report["complete_input"])
+
+    def test_saf_ndjson_entrypoint_and_rotated_directory_inputs(self):
+        manifest = {"schema": "fkclaude.audit.export.v1", "retained": 2,
+                    "max_events": 1000, "queue_dropped": 0, "disk_errors": 0}
+        exported = self.write("13-saf-export.ndjson", [manifest, event(1), event(2)])
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            status = audit.main([str(exported), "--json"])
+        report = json.loads(captured.getvalue())
+        self.assertEqual(0, status)
+        self.assertEqual(1, report["input"]["files_read"])
+        self.assertEqual(1, report["input"]["export_manifests"])
+        self.assertEqual(2, report["input"]["unique_valid_events"])
+        self.assertEqual(0, report["input"]["non_jsonl_files_ignored"])
+
+        self.write("rotated.ndjson.1", [event(3)])
+        self.write("unrelated.txt", [event(4)])
+        directory_report = audit.analyze([self.root])
+        self.assertTrue(directory_report["complete_input"])
+        self.assertEqual(2, directory_report["input"]["files_read"])
+        self.assertEqual(3, directory_report["input"]["unique_valid_events"])
 
     def test_input_budgets_and_oversized_lines_are_explicit(self):
         path = self.write("events.jsonl", [event(1), event(2)])

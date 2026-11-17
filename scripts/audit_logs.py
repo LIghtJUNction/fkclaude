@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize local fkclaude JSONL without exposing payloads, identifiers or filenames."""
+"""Summarize local fkclaude JSONL/NDJSON without exposing payloads, identifiers or filenames."""
 from __future__ import annotations
 
 import argparse
@@ -162,6 +162,11 @@ def _endpoint(details):
     return "{} {} {}".format(method, _host(host), _route(path))
 
 
+def _log_filename(name):
+    # Keep disk JSONL and SAF NDJSON exports on the same rotation/gzip naming rules.
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in ("*.jsonl*", "*.ndjson*"))
+
+
 def _files(paths, counters, limits):
     found, seen, examined_dirs, examined_names = [], set(), 0, 0
     def scan_error(_error):
@@ -181,7 +186,7 @@ def _files(paths, counters, limits):
                     if examined_names > 16_384:
                         limits["directory_scan"] = True
                         break
-                    if fnmatch.fnmatchcase(name, "*.jsonl*"):
+                    if _log_filename(name):
                         candidates.append(Path(current) / name)
                     if len(candidates) >= MAX_FILES + 1:
                         limits["files"] = True
@@ -194,7 +199,7 @@ def _files(paths, counters, limits):
             counters["file_errors"] += 1
             continue
         for candidate in candidates:
-            if not fnmatch.fnmatchcase(candidate.name, "*.jsonl*"):
+            if not _log_filename(candidate.name):
                 counters["non_jsonl_files_ignored"] += 1
                 continue
             if candidate.is_symlink():
@@ -503,7 +508,7 @@ def human_summary(report):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("paths", nargs="+", help="JSONL files or directories; only *.jsonl* files are read")
+    parser.add_argument("paths", nargs="+", help="JSONL/NDJSON files or directories; only *.jsonl* and *.ndjson* files are read")
     parser.add_argument("--json", action="store_true", help="emit fkclaude.audit.summary.v1 JSON")
     parser.add_argument("--non-conversation", action="store_true",
                         help="include network/telemetry/integrity/webview/unknown events")

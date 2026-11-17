@@ -98,12 +98,15 @@ final class AuditPanel {
     };
     private final Runnable searchChanged = () -> refresh(true);
 
-    static void attach(Activity activity) {
+    static void attach(Activity activity) { attach(activity, false); }
+
+    /** Returns true only after an explicitly requested panel is visible. */
+    static boolean attach(Activity activity, boolean requested) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            MAIN.post(() -> attach(activity));
-            return;
+            MAIN.post(() -> attach(activity, requested));
+            return false;
         }
-        if (activity.isFinishing() || activity.isDestroyed()) return;
+        if (activity.isFinishing() || activity.isDestroyed()) return false;
         try {
             WeakReference<AuditPanel> reference = PANELS.get(activity);
             AuditPanel panel = reference == null ? null : reference.get();
@@ -117,14 +120,19 @@ final class AuditPanel {
                 MAIN.post(panel.tick);
             }
             Intent intent = activity.getIntent();
-            if (intent != null && intent.getBooleanExtra(OPEN_EXTRA, false)) {
-                intent.removeExtra(OPEN_EXTRA);
+            if (requested || (intent != null && intent.getBooleanExtra(OPEN_EXTRA, false))) {
+                AuditLog.record("system", "audit_panel_request", "AuditPanel", "requested",
+                        Map.of("phase", requested ? "preserved_intent" : "intent"));
                 panel.bubble.setVisibility(View.VISIBLE);
-                panel.show();
+                if (panel.show()) {
+                    if (intent != null) intent.removeExtra(OPEN_EXTRA);
+                    return true;
+                }
             }
-        } catch (RuntimeException ignored) {
-            // Audit presentation must never prevent the host Activity from resuming.
+        } catch (Throwable error) {
+            AuditHooks.uiFailure("attach", error);
         }
+        return false;
     }
 
     static void pause(Activity activity) {
@@ -257,7 +265,28 @@ final class AuditPanel {
         bubble.setY(Math.max(top, Math.min(y, bottom)));
     }
 
-    private void show() {
+    private boolean show() {
+        boolean alreadyVisible = dialog != null && dialog.isShowing();
+        try {
+            showInternal();
+            boolean visible = dialog != null && dialog.isShowing();
+            if (visible && !alreadyVisible)
+                AuditLog.record("system", "audit_panel_open", "AuditPanel", "visible", Map.of("phase", "dialog"));
+            return visible;
+        } catch (Throwable error) {
+            MAIN.removeCallbacks(tick);
+            MAIN.removeCallbacks(searchChanged);
+            try { if (dialog != null) dialog.dismiss(); }
+            catch (Throwable cleanupError) { AuditHooks.uiFailure("show_cleanup", cleanupError); }
+            dialog = null;
+            try { bubble.setVisibility(View.VISIBLE); }
+            catch (Throwable cleanupError) { AuditHooks.uiFailure("entry_restore", cleanupError); }
+            AuditHooks.uiFailure("show", error);
+            return false;
+        }
+    }
+
+    private void showInternal() {
         Activity activity = owner.get();
         if (disposed || activity == null || activity.isDestroyed() || activity.isFinishing()) return;
         if (dialog != null && dialog.isShowing()) return;
@@ -446,8 +475,20 @@ final class AuditPanel {
         recording.setChecked(AuditLog.isEnabled());
         updatingToggle = false;
         status.setText((AuditLog.isEnabled() ? "记录中" : "已停止记录")
-                + (paused ? " · 列表已暂停" : " · 实时刷新") + "\n" + AuditLog.summary());
+                + (paused ? " · 列表已暂停" : " · 实时刷新") + "\n" + summaryLabel(AuditLog.summary()));
         bubble.setText(AuditLog.isEnabled() ? "审计" : "审计 · 停");
+    }
+
+    private static String summaryLabel(String raw) {
+        return raw.replaceFirst("^(Recording|Paused) \\| ", "")
+                .replace("PID ", "进程 ")
+                .replaceAll("([0-9]+/[0-9]+) retained", "保留 $1")
+                .replace("evicted ", "淘汰 ")
+                .replace("queue dropped ", "队列丢弃 ")
+                .replace("disk errors ", "磁盘错误 ")
+                .replace("invalid history ", "无效历史 ")
+                .replace("loading history", "正在载入历史")
+                .replace(" | ", " · ");
     }
 
     private void refresh(boolean force) {
@@ -581,17 +622,248 @@ final class AuditPanel {
                 String label = kind;
                 for (int i = 0; i < CATEGORIES.length; i++) if (CATEGORIES[i].equals(kind)) { label = LABELS[i]; break; }
                 JSONObject fields = json.optJSONObject("details");
-                String endpoint = fields == null ? "" : fields.optString("url",
-                        fields.optString("endpoint", fields.optString("host", "")));
+                if (fields == null) fields = new JSONObject();
                 String source = json.optString("source", "");
-                String subtitle = endpoint.isEmpty() ? source : endpoint + "\n" + source;
+                String action = json.optString("action", "event");
                 String outcome = json.optString("outcome", "");
                 return new Event(line, json.optString("session_id", json.optString("session", ""))
-                        + ":" + json.optLong("seq", 0), time + "  ·  " + label + "  ·  " + outcome,
-                        json.optString("action", "event"), subtitle);
+                        + ":" + json.optLong("seq", 0),
+                        time + "  ·  " + label + "  ·  " + outcomeLabel(outcome, fields),
+                        actionLabel(action, kind, source, fields),
+                        detailLabel(action, source, fields));
             } catch (Exception ignored) {
                 return new Event(line, Integer.toHexString(line.hashCode()), "审计记录", "查看 JSON", "");
             }
+        }
+
+        private static String outcomeLabel(String outcome, JSONObject fields) {
+            return switch (outcome) {
+                case "called" -> "调用开始";
+                case "attempted" -> "尝试发送";
+                case "returned" -> "bytes_accepted_by_socket".equals(fields.optString("observation"))
+                        ? "本机套接字已返回" : "接口已返回";
+                case "response_received" -> "收到响应";
+                case "blocked" -> "已阻断";
+                case "failed" -> "NameNotFoundException".equals(fields.optString("error_type")) ? "查询未命中" : "调用失败";
+                case "constructed" -> "已构造事件";
+                case "observed" -> "已观察";
+                case "installed" -> "已安装";
+                case "unavailable" -> "不可用";
+                case "unsupported" -> "未适配";
+                case "dropped" -> "已丢弃";
+                case "queue_result" -> switch (fields.optString("phase")) {
+                    case "accepted" -> "发送队列已接纳";
+                    case "rejected" -> "发送队列未接纳";
+                    default -> "发送队列已返回";
+                };
+                case "visible" -> "已显示";
+                case "requested" -> "已请求";
+                case "enabled" -> "已开启";
+                case "disabled" -> "已关闭";
+                case "cleared" -> "已清空";
+                default -> outcome;
+            };
+        }
+
+        private static boolean http(String action) {
+            return action.startsWith("http_") || action.equals("web_request") || action.equals("web_response")
+                    || action.equals("web_failure") || action.equals("web_beacon_queued");
+        }
+
+        private static String actionLabel(String action, String kind, String source, JSONObject fields) {
+            if (http(action)) {
+                String method = fields.optString("method", "");
+                if ("UNKNOWN".equals(method)) method = "";
+                if ("FRAME".equals(method)) return "WebSocket 数据帧发送";
+                String path = path(fields);
+                if (!method.isEmpty() || !path.isEmpty())
+                    return (method.isEmpty() ? "请求" : method) + (path.isEmpty() ? " 网络请求" : " " + path);
+                return action.startsWith("web_") ? "网页网络请求" : "HTTP 请求";
+            }
+            if (action.startsWith("native_")) {
+                String operation = action.substring("native_".length());
+                String transport = fields.optString("transport", "").toUpperCase(Locale.ROOT);
+                String prefix = "原生" + (transport.isEmpty() || transport.equals("UNKNOWN") ? "" : " " + transport);
+                return switch (operation) {
+                    case "connect" -> prefix + " 连接调用";
+                    case "send", "sendto", "sendmsg", "sendmmsg" -> prefix + " 发送（" + operation + "）";
+                    case "write", "writev" -> prefix + " 套接字写入（" + operation + "）";
+                    default -> action;
+                };
+            }
+            return switch (action) {
+                case "api_access" -> apiLabel(kind, source);
+                case "identifier_read" -> "访问 Android ID 接口";
+                case "system_property_read" -> "查询系统属性";
+                case "provider_query" -> kind.equals("contacts") ? "查询联系人接口"
+                        : kind.equals("calendar") ? "查询日历接口" : "查询数据接口";
+                case "environment_file_probe" -> "探测系统环境文件";
+                case "environment_command" -> "调用环境检查命令";
+                case "dns_lookup" -> "解析域名";
+                case "socket_connect" -> "请求 TCP 连接";
+                case "datagram_send" -> "调用 UDP 发送接口";
+                case "connection_created" -> "创建网络连接对象";
+                case "navigation" -> "请求网页导航";
+                case "sift_collect" -> "Sift 设备采集入口";
+                case "sift_queue" -> "Sift 事件入队接口";
+                case "sift_dispatch" -> "Sift 上传协程入口";
+                case "sift_device_properties" -> "构造 Sift 设备信息事件";
+                case "sift_app_state" -> "构造 Sift 应用状态事件";
+                case "analytics_context" -> "构造统计上下文";
+                case "product_analytics_event" -> "构造产品统计事件";
+                case "analytics_batch" -> "创建统计批量请求";
+                case "web_installed" -> "网页审计已就绪";
+                case "web_device_read" -> "访问网页设备信息接口";
+                case "web_sensitive_api" -> webApiLabel(fields.optString("field"));
+                case "web_dropped", "webview_rate_limit" -> "网页事件限流";
+                case "webview_coverage" -> "网页审计覆盖状态";
+                case "coverage", "hook_coverage", "target_adapter" -> "审计覆盖状态";
+                case "environment_policy" -> "环境覆盖策略";
+                case "activity_resumed" -> "应用页面进入前台";
+                case "audit_panel_request" -> "请求打开审计面板";
+                case "audit_panel_open" -> "审计面板已打开";
+                case "observer_error" -> "审计观察点异常";
+                default -> action;
+            };
+        }
+
+        private static String apiLabel(String kind, String source) {
+            String name = source.substring(source.lastIndexOf('#') + 1);
+            return switch (name) {
+                case "getApplicationInfo" -> "查询应用信息";
+                case "getPackageInfo" -> "查询应用包信息";
+                case "getInstalledApplications" -> "查询已安装应用";
+                case "getInstalledPackages" -> "查询已安装应用包";
+                case "queryIntentActivities" -> "查询可处理操作的应用";
+                case "getPrimaryClip" -> "访问剪贴板读取接口";
+                case "getPrimaryClipDescription" -> "查询剪贴板内容类型";
+                case "hasPrimaryClip" -> "检查剪贴板是否有内容";
+                case "getLastKnownLocation" -> "访问最近定位接口";
+                case "getCurrentLocation", "requestSingleUpdate" -> "请求定位";
+                case "requestLocationUpdates" -> "请求定位更新";
+                case "getLatitude" -> "访问纬度接口";
+                case "getLongitude" -> "访问经度接口";
+                case "getAltitude" -> "访问海拔接口";
+                case "getDeviceId" -> "访问设备标识接口";
+                case "getImei" -> "访问 IMEI 接口";
+                case "getMeid" -> "访问 MEID 接口";
+                case "getSubscriberId" -> "访问 SIM 用户标识接口";
+                case "getSimSerialNumber" -> "访问 SIM 序列号接口";
+                case "getLine1Number" -> "访问本机号码接口";
+                case "getSerial" -> "访问设备序列号接口";
+                case "getNetworkOperatorName", "getSimOperatorName", "getNetworkOperator", "getSimOperator" -> "查询运营商信息";
+                case "getSimCountryIso", "getNetworkCountryIso" -> "查询运营商国家信息";
+                case "getSSID" -> "查询 Wi-Fi 名称接口";
+                case "getBSSID" -> "查询 Wi-Fi 接入点标识";
+                case "getMacAddress", "getHardwareAddress" -> "访问网卡地址接口";
+                case "getIpAddress", "getInetAddresses", "getInterfaceAddresses" -> "查询本地网络地址";
+                case "getScanResults" -> "查询 Wi-Fi 扫描结果";
+                case "getSensorList", "getDynamicSensorList", "getDefaultSensor" -> "查询传感器接口";
+                case "registerListener" -> kind.equals("sensor") ? "调用传感器监听接口" : "注册监听接口";
+                case "startRecording" -> "请求开始录音";
+                case "start" -> kind.equals("microphone") ? "请求开始媒体录制" : "调用启动接口";
+                case "openCamera", "open" -> kind.equals("camera") ? "请求打开相机" : "调用打开接口";
+                case "getIntProperty", "isCharging" -> "查询电池信息";
+                case "getMemoryInfo" -> "查询内存信息";
+                case "getTotalBytes", "getAvailableBytes", "getFreeBytes" -> "查询存储容量";
+                case "captureEvent", "captureException", "captureMessage", "captureTransaction", "captureEnvelope" -> "调用 Sentry 遥测接口";
+                default -> "调用接口 " + name;
+            };
+        }
+
+        private static String webApiLabel(String field) {
+            if (field.startsWith("geolocation.")) return "请求网页定位接口";
+            if (field.startsWith("clipboard.")) return "访问网页剪贴板接口";
+            if (field.equals("mediaDevices.getUserMedia")) return "请求网页媒体设备接口";
+            if (field.equals("mediaDevices.enumerateDevices")) return "查询网页媒体设备";
+            return "调用网页隐私接口";
+        }
+
+        private static String path(JSONObject fields) {
+            String path = fields.optString("path", "");
+            if (!path.isEmpty()) return path;
+            String url = fields.optString("url", fields.optString("endpoint", ""));
+            try {
+                String parsed = new java.net.URI(url).getRawPath();
+                return parsed == null ? "" : parsed;
+            } catch (Exception ignored) { return ""; }
+        }
+
+        private static String destination(JSONObject fields) {
+            String host = fields.optString("host", fields.optString("peer_address", ""));
+            if (host.isEmpty()) {
+                try {
+                    String parsed = new java.net.URI(fields.optString("url", "")).getHost();
+                    if (parsed != null) host = parsed;
+                } catch (Exception ignored) {}
+            }
+            String port = fields.optString("port", "");
+            if (port.isEmpty() || "0".equals(port)) return host;
+            if (host.isEmpty()) return "目标端口 " + port;
+            if (host.indexOf(':') >= 0 && !host.startsWith("[")) host = "[" + host + "]";
+            return host + ":" + port;
+        }
+
+        private static String detailLabel(String action, String source, JSONObject fields) {
+            ArrayList<String> lines = new ArrayList<>();
+            String target = destination(fields);
+            if (!target.isEmpty()) lines.add(target);
+            ArrayList<String> metrics = new ArrayList<>();
+            String status = fields.optString("status_code", "");
+            if (!status.isEmpty()) metrics.add("HTTP " + status);
+            String duration = fields.optString("duration_ms", "");
+            if (!duration.isEmpty()) metrics.add(duration + " ms");
+            String error = fields.optString("error_type", "");
+            if (!error.isEmpty()) metrics.add(error);
+            String bytes = fields.optString("bytes", "");
+            if (!bytes.isEmpty()) {
+                if ("bytes_accepted_by_socket".equals(fields.optString("observation")))
+                    metrics.add("本机套接字接纳 " + bytes + " B");
+                else if (action.equals("datagram_send") || action.startsWith("web_"))
+                    metrics.add("请求体大小 " + bytes + " B");
+            }
+            String count = fields.optString("batch_count", "");
+            if (!count.isEmpty() && !"0".equals(count)) metrics.add("消息数 " + count);
+            String errno = fields.optString("errno", "");
+            if (!errno.isEmpty() && !"0".equals(errno)) metrics.add("errno=" + errno);
+            if (!metrics.isEmpty()) lines.add(String.join(" · ", metrics));
+            if ("bytes_accepted_by_socket".equals(fields.optString("observation")))
+                lines.add("对端接收状态未知");
+            else if (http(action)) {
+                String transport = fields.optString("transport", "");
+                if (!transport.isEmpty()) lines.add(switch (transport) {
+                    case "fetch" -> "网页 fetch";
+                    case "xhr" -> "网页 XMLHttpRequest";
+                    case "beacon" -> "网页 Beacon";
+                    case "websocket" -> "WebSocket";
+                    case "okhttp" -> "应用 HTTP 客户端";
+                    case "urlconnection" -> "系统 HTTP 客户端";
+                    default -> transport;
+                });
+            } else if (action.equals("api_access")) {
+                String api = fields.optString("api", source);
+                int hash = api.lastIndexOf('#');
+                if (hash > 0) {
+                    String owner = api.substring(0, hash);
+                    int dot = owner.lastIndexOf('.');
+                    lines.add(owner.substring(dot + 1) + api.substring(hash));
+                } else if (!api.isEmpty()) lines.add(api);
+            } else {
+                String field = fields.optString("field", "");
+                if (!field.isEmpty()) lines.add("接口 / 字段：" + field);
+                String operation = fields.optString("operation", "");
+                if (!operation.isEmpty()) lines.add("命令：" + operation);
+                String reason = fields.optString("reason", "");
+                if (!reason.isEmpty()) lines.add("策略：" + reason);
+                if ("schema_only_values_not_read".equals(fields.optString("coverage")))
+                    lines.add("记录字段结构，原值未写入日志");
+                if (action.equals("coverage")) {
+                    String hooks = fields.optString("hook_count", "");
+                    if (!hooks.isEmpty()) lines.add("可用观察点 " + hooks + " · 未适配 " + fields.optString("count", "0"));
+                }
+            }
+            if (lines.isEmpty() && !source.isEmpty()) lines.add(source);
+            return String.join("\n", lines);
         }
     }
 

@@ -173,6 +173,65 @@ class AuditLogAnalysisTest(unittest.TestCase):
         self.assertEqual(7, report["recorder_counter_maxima"]["queue_dropped"])
         self.assertEqual(2, report["recorder_counter_maxima"]["disk_errors"])
 
+    def test_actual_observer_statuses_are_not_collapsed_or_counted_as_socket_calls(self):
+        records = [
+            event(1, category="system", action="native_observer_installed", outcome="partial",
+                  details={"installed": "6", "requested": "7", "layer": "native"}),
+            event(2, category="system", action="native_observer_unavailable", outcome="unsupported"),
+            event(3, category="system", action="native_observer_control_failed", outcome="failed"),
+            event(4, category="system", action="native_observer_error", outcome="failed"),
+            event(5, category="system", action="environment_policy", outcome="observed"),
+            event(6, category="telemetry", action="sift_queue", outcome="queue_result"),
+            event(7, category="system", action="native_queue_dropped", outcome="dropped",
+                  details={"queue_dropped": "4", "layer": "native"}),
+            event(8, category="system", action="audit_panel_request", outcome="requested",
+                  source="AuditPanel", details={"phase": "intent"}),
+            event(9, category="system", action="audit_panel_open", outcome="visible",
+                  source="AuditPanel", details={"phase": "dialog"}),
+        ]
+        report = audit.analyze([self.write("observer.jsonl", records)])
+        self.assertEqual(0, report["unrecognized"]["action_events"])
+        self.assertEqual(0, report["unrecognized"]["outcome_events"])
+        self.assertEqual(1, report["outcomes"]["partial"])
+        self.assertEqual(1, report["outcomes"]["dropped"])
+        self.assertEqual(1, report["outcomes"]["queue_result"])
+        self.assertEqual(1, report["outcomes"]["requested"])
+        self.assertEqual(1, report["outcomes"]["visible"])
+        self.assertEqual({}, report["native_io"]["observed_calls_by_action"])
+        self.assertEqual(0, sum(report["native_io"]["observed_socket_return_bytes"].values()))
+        self.assertIsNone(report["correlation"]["independent_upload_count"])
+
+    def test_native_drop_deltas_are_deduplicated_before_network_filter(self):
+        first = event(1, category="system", action="native_queue_dropped", outcome="dropped",
+                      details={"queue_dropped": "5", "layer": "native"})
+        second = event(2, category="system", action="native_queue_dropped", outcome="dropped",
+                       details={"queue_dropped": "7", "layer": "native"})
+        native = event(3, action="native_sendto", outcome="returned", source="libc.sendto",
+                       details={"bytes": "100", "layer": "native", "caller": "application"})
+        manifest = {"schema": "fkclaude.audit.export.v1", "queue_dropped": 90}
+        a = self.write("a.jsonl", [manifest, first, second, native])
+        b = self.write("b.jsonl", [first])
+        report = audit.analyze([a, b], non_conversation=True)
+        self.assertEqual(1, report["input"]["selected_events"])
+        self.assertEqual(1, report["input"]["duplicate_events"])
+        self.assertEqual(2, report["native_io"]["queue_drop_reports"])
+        self.assertEqual(12, report["native_io"]["queue_dropped_records_reported"])
+        self.assertEqual(90, report["recorder_counter_maxima"]["queue_dropped"])
+        self.assertEqual(100, report["native_io"]["observed_socket_return_bytes"]["application"])
+        self.assertEqual(0, report["native_io"]["invalid_queue_drop_reports"])
+        self.assertIsNone(report["correlation"]["independent_upload_count"])
+        self.assertTrue(report["complete_input"])
+
+        malformed = self.write("invalid.jsonl", [
+            event(4, category="system", action="native_queue_dropped", outcome="dropped",
+                  details={"queue_dropped": "private-invalid-counter"})])
+        report = audit.analyze([a, b, malformed], non_conversation=True)
+        self.assertEqual(12, report["native_io"]["queue_dropped_records_reported"])
+        self.assertEqual(1, report["native_io"]["invalid_queue_drop_reports"])
+        self.assertEqual(1, report["invalid"]["native_drop_count"])
+        self.assertFalse(report["complete_input"])
+        self.assertNotIn("private-invalid-counter", json.dumps(report))
+
     def test_invalid_type_or_missing_path_is_reported_without_path_contents(self):
         path = self.write("bad.jsonl", [event(details={"nested": {"secret": "value"}})])
         missing = self.root / "PRIVATE-MISSING.jsonl"

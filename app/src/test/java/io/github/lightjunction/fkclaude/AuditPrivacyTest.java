@@ -57,6 +57,31 @@ public final class AuditPrivacyTest {
         assertEquals("android.provider.Settings$Secure#getString", safe.get("api"));
     }
 
+    @Test public void fixedDiagnosticsRemainReadableWithoutOpeningTokenBoundary() {
+        Map<String, String> diagnostics = Map.of(
+                "observation", "opaque_bytes_no_payload_or_source_address",
+                "coverage", "request_construction_not_delivery",
+                "reason", "native_queue_contention_capacity_or_batch_limit");
+        assertEquals(diagnostics, AuditSanitizer.details(diagnostics));
+        for (String coverage : new String[]{
+                "document_start_or_message_listener_unsupported",
+                "page_reported_metadata;workers_native_and_server_processing_not_observed"}) {
+            assertEquals(coverage, AuditSanitizer.details(Map.of("coverage", coverage)).get("coverage"));
+        }
+        String messageObservation = "per_message_bytes_accepted_by_socket";
+        assertEquals(messageObservation, AuditSanitizer.details(
+                Map.of("observation", messageObservation)).get("observation"));
+
+        String observation = diagnostics.get("observation");
+        assertEquals("[token]", AuditSanitizer.details(Map.of("caller", observation)).get("caller"));
+        assertEquals("[token]", AuditSanitizer.details(
+                Map.of("observation", observation + "_private")).get("observation"));
+        assertEquals("[token]", AuditSanitizer.details(
+                Map.of("coverage", "arbitrary_private_identifier_value_123456789")).get("coverage"));
+        assertEquals("[token]", AuditSanitizer.text(observation));
+        assertTrue(AuditSanitizer.details(Map.of("authorization", observation)).isEmpty());
+    }
+
     @Test public void freeMetadataRedactsCredentialsIdentifiersAndInjection() {
         String safe = AuditSanitizer.text("Bearer eyJprivate.token "
                 + "customer@example.org 55f22f65-9d8f-441c-94e3-75305bb01cd2 "

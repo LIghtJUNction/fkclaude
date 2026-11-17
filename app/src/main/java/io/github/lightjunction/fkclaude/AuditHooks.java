@@ -20,6 +20,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** Observers never replace arguments, results, exceptions, requests or response bodies. */
@@ -29,6 +30,8 @@ final class AuditHooks {
     private static final AtomicLong IDS = new AtomicLong();
     private static final Set<String> REPORTED = Collections.synchronizedSet(new HashSet<>());
     private static final Set<Class<?>> ACTIVITY_TYPES = Collections.synchronizedSet(new HashSet<>());
+    private static final Set<Activity> RESUMED_ACTIVITIES = Collections.newSetFromMap(new WeakHashMap<>());
+    private static final Set<Activity> REQUESTED_PANELS = Collections.newSetFromMap(new WeakHashMap<>());
     private static int available, missing;
     @FunctionalInterface private interface Inspector { Observation inspect(XC_MethodHook.MethodHookParam p) throws Throwable; }
     private record Observation(String category, String action, String source, Map<String,String> details,
@@ -61,21 +64,28 @@ final class AuditHooks {
     }
 
     private static void lifecycle(ClassLoader loader) {
+        hook("android.app.Instrumentation", loader, "callActivityOnCreate", new XC_MethodHook(10000) {
+            @Override protected void beforeHookedMethod(MethodHookParam p) {
+                if (p.args.length > 0 && p.args[0] instanceof Activity activity)
+                    rememberPanelRequest(activity, activity.getIntent(), "before_create");
+            }
+        });
         hook("android.app.Instrumentation", loader, "callActivityOnResume", new XC_MethodHook() {
             @Override protected void afterHookedMethod(MethodHookParam p) {
                 if (!p.hasThrowable() && p.args.length > 0 && p.args[0] instanceof Activity activity) {
-                    try {
-                        activityResults(activity);
-                        AuditPanel.attach(activity);
-                        AuditLog.record("system", "activity_resumed", "Instrumentation", "observed",
-                                Map.of("field", activity.getClass().getName()));
-                    } catch (Throwable error) { failed("activity_panel", error); }
+                    RESUMED_ACTIVITIES.add(activity);
+                    AuditLog.record("system", "activity_resumed", "Instrumentation", "observed",
+                            Map.of("field", activity.getClass().getName()));
+                    try { activityResults(activity); }
+                    catch (Throwable error) { failed("activity_result_setup", error); }
+                    postPanel(activity);
                 }
             }
         });
         hook("android.app.Instrumentation", loader, "callActivityOnPause", new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam p) {
                 if (p.args.length > 0 && p.args[0] instanceof Activity activity) {
+                    RESUMED_ACTIVITIES.remove(activity);
                     try { AuditPanel.pause(activity); } catch (Throwable error) { failed("activity_pause", error); }
                 }
             }
@@ -83,32 +93,59 @@ final class AuditHooks {
         hook("android.app.Instrumentation", loader, "callActivityOnDestroy", new XC_MethodHook() {
             @Override protected void beforeHookedMethod(MethodHookParam p) {
                 if (p.args.length > 0 && p.args[0] instanceof Activity activity) {
+                    RESUMED_ACTIVITIES.remove(activity);
+                    REQUESTED_PANELS.remove(activity);
                     try { AuditPanel.detach(activity); } catch (Throwable error) { failed("activity_detach", error); }
                 }
             }
         });
-        hook("android.app.Instrumentation", loader, "callActivityOnNewIntent", new XC_MethodHook() {
+        hook("android.app.Instrumentation", loader, "callActivityOnNewIntent", new XC_MethodHook(10000) {
+            @Override protected void beforeHookedMethod(MethodHookParam p) {
+                if (p.args.length > 1 && p.args[0] instanceof Activity activity && p.args[1] instanceof Intent intent)
+                    rememberPanelRequest(activity, intent, "before_new_intent");
+            }
             @Override protected void afterHookedMethod(MethodHookParam p) {
-                if (p.args.length > 1 && p.args[0] instanceof Activity activity && p.args[1] instanceof Intent intent
-                        && intent.getBooleanExtra("fkclaude.openAudit", false)) {
-                    try { activity.setIntent(intent); AuditPanel.attach(activity); }
-                    catch (Throwable error) { failed("activity_intent", error); }
-                }
+                if (!p.hasThrowable() && p.args.length > 0 && p.args[0] instanceof Activity activity
+                        && REQUESTED_PANELS.contains(activity)) postPanel(activity);
             }
         });
+    }
+
+    private static void rememberPanelRequest(Activity activity, Intent intent, String phase) {
+        try {
+            if (intent != null && intent.getBooleanExtra("fkclaude.openAudit", false)
+                    && REQUESTED_PANELS.add(activity))
+                AuditLog.record("system", "audit_panel_request", "Instrumentation", "requested", Map.of("phase", phase));
+        } catch (Throwable error) { failed("activity_intent_capture", error); }
+    }
+
+    private static void postPanel(Activity activity) {
+        try {
+            activity.getWindow().getDecorView().post(() -> {
+                if (!RESUMED_ACTIVITIES.contains(activity) || activity.isFinishing() || activity.isDestroyed()) return;
+                try {
+                    if (AuditPanel.attach(activity, REQUESTED_PANELS.contains(activity)))
+                        REQUESTED_PANELS.remove(activity);
+                } catch (Throwable error) { failed("activity_panel", error); }
+            });
+        } catch (Throwable error) { failed("activity_panel_schedule", error); }
     }
 
     private static void activityResults(Activity activity) {
         for (Class<?> type = activity.getClass(); type != null && Activity.class.isAssignableFrom(type); type = type.getSuperclass()) {
             if (!ACTIVITY_TYPES.add(type)) continue;
-            XposedBridge.hookAllMethods(type, "onActivityResult", new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam p) {
-                    if (p.args.length == 3 && p.args[0] instanceof Integer request && p.args[1] instanceof Integer result) {
-                        try { AuditPanel.onActivityResult((Activity) p.thisObject, request, result, (Intent) p.args[2]); }
+            try {
+                // Resolving every declared method can load optional platform types unrelated to result delivery.
+                java.lang.reflect.Method result = type.getDeclaredMethod("onActivityResult", int.class, int.class, Intent.class);
+                XposedBridge.hookMethod(result, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam p) {
+                        try { AuditPanel.onActivityResult((Activity) p.thisObject, (Integer) p.args[0], (Integer) p.args[1], (Intent) p.args[2]); }
                         catch (Throwable error) { failed("activity_result", error); }
                     }
-                }
-            });
+                });
+            } catch (NoSuchMethodException ignored) {
+                // The inherited implementation is visited later in the hierarchy.
+            } catch (Throwable error) { failed("activity_result_setup." + type.getName(), error); }
         }
     }
 
@@ -369,8 +406,48 @@ final class AuditHooks {
         AuditLog.record("system", "hook_coverage", name, "unavailable", Map.of("coverage", "not_observed"));
     }
     private static String signature(Member member) { return member.getDeclaringClass().getName() + "#" + member.getName(); }
+    static void uiFailure(String stage, Throwable error) {
+        try { failed("audit_ui." + stage, error); }
+        catch (Throwable diagnosticError) {
+            try { XposedBridge.log("fkclaude: audit UI diagnostic failed (" + diagnosticError.getClass().getSimpleName() + ")"); }
+            catch (Throwable ignored) { /* Diagnostics must not propagate into the host UI. */ }
+        }
+    }
+
     private static void failed(String source, Throwable error) {
-        if (REPORTED.add(source)) AuditLog.record("system", "observer_error", source, "failed",
-                Map.of("error_type", error.getClass().getSimpleName()));
+        if (!REPORTED.add(source)) return;
+        Map<String,String> details = new LinkedHashMap<>();
+        details.put("error_type", error.getClass().getSimpleName());
+        StringBuilder diagnostic = new StringBuilder("fkclaude: observer ").append(source);
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 3; depth++, current = current.getCause()) {
+            diagnostic.append(" cause=").append(current.getClass().getName());
+            String missingClass = missingClass(current);
+            if (missingClass != null) {
+                details.put("field", missingClass);
+                diagnostic.append(" missing_class=").append(missingClass);
+            }
+            StackTraceElement[] frames = current.getStackTrace();
+            for (int i = 0; i < Math.min(4, frames.length); i++) {
+                String frame = frames[i].getClassName() + "#" + frames[i].getMethodName();
+                if (depth == 0 && i == 0) details.put("caller", frame);
+                diagnostic.append(" at=").append(frame);
+            }
+        }
+        AuditLog.record("system", "observer_error", source, "failed", details);
+        // Only exception types, validated class identifiers and class/method frames; never arbitrary messages.
+        XposedBridge.log(diagnostic.toString());
+    }
+
+    private static String missingClass(Throwable error) {
+        if (!(error instanceof NoClassDefFoundError) && !(error instanceof ClassNotFoundException)) return null;
+        String message = error.getMessage();
+        if (message == null || message.length() > 2048) return null;
+        java.util.regex.Matcher descriptor = java.util.regex.Pattern.compile("L([A-Za-z_$][A-Za-z0-9_$/]{0,240});").matcher(message);
+        if (descriptor.find()) return descriptor.group(1).replace('/', '.');
+        if (message.matches("[A-Za-z_$][A-Za-z0-9_.$/]{0,240}")) return message.replace('/', '.');
+        java.util.regex.Matcher named = java.util.regex.Pattern.compile(
+                "(?:Could not initialize class|Didn't find class) [^A-Za-z_$]*([A-Za-z_$][A-Za-z0-9_.$/]{0,240})").matcher(message);
+        return named.find() ? named.group(1).replace('/', '.') : null;
     }
 }

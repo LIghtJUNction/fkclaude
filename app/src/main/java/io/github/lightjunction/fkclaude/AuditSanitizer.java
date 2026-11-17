@@ -50,6 +50,15 @@ public final class AuditSanitizer {
             "caller", "phase", "version", "process", "layer", "field", "mime_type", "event_type",
             "result_type", "permission", "sdk", "stack", "direction", "upload", "classification",
             "observation", "value_policy", "category", "enabled", "state", "address_family");
+    // These are exact, source-defined diagnostics, never arbitrary caller-supplied tokens.
+    // Keep the exception scoped to its detail key; the generic redactor remains unchanged.
+    private static final Map<String, Set<String>> FIXED_METADATA = Map.of(
+            "observation", Set.of("opaque_bytes_no_payload_or_source_address",
+                    "per_message_bytes_accepted_by_socket"),
+            "coverage", Set.of("request_construction_not_delivery",
+                    "document_start_or_message_listener_unsupported",
+                    "page_reported_metadata;workers_native_and_server_processing_not_observed"),
+            "reason", Set.of("native_queue_contention_capacity_or_batch_limit"));
     private AuditSanitizer() {}
 
     public static String text(String value) {
@@ -155,7 +164,10 @@ public final class AuditSanitizer {
                 String media = value.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
                 safe = media.matches("[a-z0-9.+-]{1,40}/[a-z0-9.+-]{1,60}") ? media : "[type]";
             } else if (NUMERIC.contains(key)) safe = value.matches("-?[0-9]{1,18}") ? value : "[number]";
-            else if (IDENTIFIERS.contains(key)) safe = identifier(value);
+            else if (IDENTIFIERS.contains(key)) {
+                Set<String> fixed = FIXED_METADATA.get(key);
+                safe = fixed != null && fixed.contains(value) ? value : identifier(value);
+            }
             else continue;
             if (safe.length() > 640) safe = safe.substring(0, 640) + "\u2026";
             budget += key.length() + safe.length();

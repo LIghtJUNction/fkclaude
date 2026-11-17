@@ -27,7 +27,8 @@ CATEGORIES = frozenset(("system", "network", "conversation", "telemetry", "devic
 NETWORK = frozenset(("network", "telemetry", "integrity", "webview", "unknown"))
 OUTCOMES = frozenset(("attempted", "blocked", "response_received", "returned", "failed", "called",
                      "constructed", "observed", "installed", "unavailable", "unsupported",
-                     "enabled", "disabled", "completed", "scheduled", "sent"))
+                     "enabled", "disabled", "completed", "scheduled", "sent",
+                     "partial", "dropped", "queue_result", "requested", "visible"))
 ACTIONS = frozenset((
     "audit_started", "recording_changed", "audit_cleared", "target_adapter", "coverage",
     "activity_resumed", "hook_coverage", "observer_error", "api_access", "identifier_read",
@@ -38,12 +39,16 @@ ACTIONS = frozenset((
     "sift_app_state", "analytics_context", "product_analytics_event", "analytics_batch",
     "native_connect", "native_send", "native_sendto", "native_sendmsg", "native_sendmmsg",
     "native_write", "native_writev", "native_queue_dropped", "native_coverage",
-    "native_poll_error", "web_fetch", "web_xhr", "web_beacon", "web_websocket",
+    "native_poll_error", "native_observer_installed", "native_observer_unavailable",
+    "native_observer_control_failed", "native_observer_error", "environment_policy",
+    "audit_panel_request", "audit_panel_open",
+    "web_fetch", "web_xhr", "web_beacon", "web_websocket",
     "fetch", "xhr", "beacon", "websocket", "sendBeacon", "webview_bridge"))
-NATIVE_ACTIONS = frozenset(action for action in ACTIONS if action.startswith("native_")
-                           and action not in ("native_queue_dropped", "native_coverage", "native_poll_error"))
+# Observer/control/drop diagnostics are not socket operations.
+NATIVE_ACTIONS = frozenset(("native_connect", "native_send", "native_sendto", "native_sendmsg",
+                           "native_sendmmsg", "native_write", "native_writev"))
 BYTE_ACTIONS = NATIVE_ACTIONS - {"native_connect"}
-METHODS = frozenset(("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT", "TRACE", "WS"))
+METHODS = frozenset(("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT", "TRACE", "WS", "FRAME"))
 PATH_WORDS = frozenset((
     "api", "v1", "v2", "v3", "v4", "accounts", "account", "organizations", "organization",
     "users", "user", "me", "mobile_events", "events", "event", "event_logging", "batch",
@@ -277,6 +282,16 @@ def analyze(paths, *, non_conversation=False, max_bytes=MAX_BYTES, max_events=MA
             limits["events"] = stop = True
             return
         seen[key] = digest
+        # Each native drain reports a delta, unlike cumulative export-manifest counters.
+        # Deduplicate first and retain recorder health even in a network-only view.
+        if event["action"] == "native_queue_dropped":
+            counts["native_queue_drop_reports"] += 1
+            amount = _number(event["details"].get("queue_dropped"))
+            if amount is None:
+                counts["invalid_native_queue_drop_reports"] += 1
+                invalid["native_drop_count"] += 1
+            else:
+                counts["native_queue_dropped_records_reported"] += amount
         sid = event["session_id"]
         if sid not in sessions and len(sessions) < MAX_SESSIONS:
             sessions[sid] = set()
@@ -423,6 +438,10 @@ def analyze(paths, *, non_conversation=False, max_bytes=MAX_BYTES, max_events=MA
                       "observed_socket_return_bytes": dict(native_bytes),
                       "return_events_with_bytes": dict(native_byte_events),
                       "returns_without_valid_bytes": counts["native_returns_without_valid_bytes"],
+                      "queue_drop_reports": counts["native_queue_drop_reports"],
+                      "queue_dropped_records_reported": counts["native_queue_dropped_records_reported"],
+                      "invalid_queue_drop_reports": counts["invalid_native_queue_drop_reports"],
+                      "queue_counter_scope": "all_valid_unique_events_before_view_filter",
                       "meaning": "successful_socket_return_values_not_unique_traffic_or_server_receipts"},
         "sequence": {"scope": "all_valid_unique_events_before_view_filter",
                      "sessions_tracked": len(sessions), "internal_missing_sequences": missing_count,
@@ -440,6 +459,8 @@ def analyze(paths, *, non_conversation=False, max_bytes=MAX_BYTES, max_events=MA
             "The observed process can alter its own logs; these files are not a trusted remote audit authority.",
             "Only metadata is summarized. Payload values, file paths, session IDs and request IDs are omitted.",
             "Recorder counters are maxima across manifests, not sums across potentially duplicate exports.",
+            "Native queue drops sum deduplicated drain deltas; zero means no drops reported in supplied files.",
+            "Missing export manifests leave Java recorder counters unknown; native drops are separate.",
         ],
     }
 
@@ -461,6 +482,9 @@ def human_summary(report):
         "\u539f\u751f socket \u8fd4\u56de\u5b57\u8282\u89c2\u5bdf\u503c\uff1aapplication={} / instrumentation={} / unknown={}\u3002".format(
             *(report["native_io"]["observed_socket_return_bytes"][kind]
               for kind in ("application", "instrumentation", "unknown"))),
+        "Native queue drop reports={} / dropped records reported={} / invalid reports={}.".format(
+            report["native_io"]["queue_drop_reports"], report["native_io"]["queue_dropped_records_reported"],
+            report["native_io"]["invalid_queue_drop_reports"]),
         "\u7c7b\u522b\uff1a" + "\uff0c".join("{}={}".format(key, value) for key, value in report["categories"].items()),
     ]
     if report["endpoints"]:

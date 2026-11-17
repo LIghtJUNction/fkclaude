@@ -1,0 +1,52 @@
+{
+  "schema": "fkclaude.release.v1",
+  "version": "0.4.1",
+  "version_code": 6,
+  "date": "2026-11-17",
+  "build_type": "debug",
+  "apk": {
+    "file_name": "fkclaude-0.4.1.apk",
+    "bytes": 4616756,
+    "sha256": "ed14fe65c6aa8772386245f5c4b7dec5f03294ff8b8a72afae6276785a42b085",
+    "installed_on_test_device_and_hash_verified": true
+  },
+  "source": {
+    "android_code_commit": "444bb9f9a5adc71d81b41472b16a1af64dd0ae10",
+    "cli_code_commit": "4273ffc4ba3a787aa9450d90434a8b6a189af83c"
+  },
+  "verification": {
+    "java_tests": 52,
+    "python_tests": 14,
+    "lint_errors": 0,
+    "lint_warnings": 10,
+    "apk_signature": "v2 verified",
+    "static_contracts": "passed",
+    "runtime_environment": "same connected Android 16 device, temporary independent display",
+    "cold_start_explicit_popup": true,
+    "search_and_category_filter": true,
+    "non_conversation_filter": true,
+    "event_detail": true,
+    "pause_list_keeps_recording": true,
+    "recording_off_persists_across_process_restart": true,
+    "saf_export": true,
+    "clear_and_resume": true,
+    "close_and_reopen_popup": true,
+    "module_preferences_unchanged": true,
+    "temporary_display_removed": true
+  },
+  "audit_export": {
+    "schema": "fkclaude.audit.export.v1",
+    "event_schema": "fkclaude.audit.v1",
+    "verified_retained_events": 1000,
+    "format": "ndjson",
+    "cli_accepts_native_suffix": true,
+    "payload_policy": "metadata only; request/response bodies are not read",
+    "scope": "bounded retained history; not a complete record of all application activity"
+  },
+  "evidence": {
+    "device_report": "docs/device-audit-2026-11-17.md",
+    "build_and_ui_validation": "docs/validation-0.4.1.md",
+    "export_aggregate": "docs/device-audit-2026-11-17-export-validation.json",
+    "raw_apks_logs_and_screenshots_committed": false
+  }
+}

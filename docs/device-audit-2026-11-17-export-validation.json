@@ -1,0 +1,1093 @@
+{
+  "schema": "fkclaude.audit.device_validation.v1",
+  "generated_at": "2026-11-17T04:18:51.435684+00:00",
+  "method": "Offline review of saved artifacts; no ADB or live device operations. Original captures were not modified.",
+  "privacy_policy": "Aggregate counts, generated process IDs, artifact hashes and local aliases only; no original session IDs, document IDs, peer addresses, payloads or XML text.",
+  "export": {
+    "artifact": {
+      "artifact": "13-saf-export.ndjson",
+      "bytes": 553903,
+      "sha256": "dc3043dd5166b113a97149f44b1494be1fef419dca41082eea51d8bd13bea8d0",
+      "line_count": 1001,
+      "event_count": 1000,
+      "session_count": 3,
+      "pid_event_counts": {
+        "10143": 617,
+        "1730": 366,
+        "8080": 17
+      },
+      "duplicate_session_sequence_keys": 0,
+      "invalid_event_counts": {},
+      "session_ranges": [
+        {
+          "session_alias": "session_001",
+          "event_count": 366,
+          "pids": [
+            1730
+          ],
+          "first_seq": 440,
+          "last_seq": 805,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_002",
+          "event_count": 17,
+          "pids": [
+            8080
+          ],
+          "first_seq": 1,
+          "last_seq": 17,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_003",
+          "event_count": 617,
+          "pids": [
+            10143
+          ],
+          "first_seq": 1,
+          "last_seq": 617,
+          "internal_missing_sequences": 0
+        }
+      ],
+      "final_newline": true
+    },
+    "manifest": {
+      "schema": "fkclaude.audit.export.v1",
+      "time": "2026-11-17T04:13:56.292624Z",
+      "scope": "current_process_retained_window",
+      "pid": 10951,
+      "retained": 1000,
+      "max_events": 1000,
+      "queue_dropped": 0,
+      "disk_errors": 0,
+      "memory_evicted": 0,
+      "invalid_history": 0,
+      "enabled": false,
+      "value_policy": "metadata_only",
+      "server_receipt": "not_asserted"
+    },
+    "manifest_checks": {
+      "first_line_is_export_manifest": true,
+      "exactly_one_manifest": true,
+      "manifest_field_types_valid": true,
+      "following_lines_all_events": true,
+      "retained_matches_event_count": true,
+      "retained_within_maximum": true,
+      "events_match_last_1000_of_disabled_disk_snapshot": true,
+      "all_events_valid": true,
+      "session_sequence_unique": true,
+      "expected_sha256_matches": true
+    },
+    "all_manifest_checks_passed": true,
+    "exporting_pid": 10951,
+    "exported_events_from_exporting_pid": 0,
+    "history_pid_count": 3,
+    "counter_scope": "queue_dropped, disk_errors, memory_evicted and invalid_history describe the exporting recorder process lifetime, not cumulative totals of the historical events.",
+    "history_scope": "The current process restored a bounded tail of the same process-name log. The exported historical events span prior process IDs and sessions.",
+    "retention_note": "A retained count of 1000 is the configured in-memory window. Zero memory_evicted in a newly started exporter does not imply all older disk events were included.",
+    "privacy_scan": {
+      "scope": "raw_event_values_before_cli_redaction",
+      "events_checked": 1000,
+      "detail_strings_checked": 8007,
+      "pattern_hits": {},
+      "no_specified_pattern_matches": true,
+      "prohibited_detail_keys_checked": [
+        "access_token",
+        "android_id",
+        "authorization",
+        "body",
+        "clipboard",
+        "contacts",
+        "cookie",
+        "device_id",
+        "email",
+        "latitude",
+        "longitude",
+        "messages",
+        "password",
+        "payload",
+        "prompt",
+        "refresh_token",
+        "request_body",
+        "response_body",
+        "session_key",
+        "set-cookie"
+      ],
+      "pattern_families_checked": [
+        "api_key",
+        "bearer",
+        "email",
+        "hex_identifier",
+        "jwt",
+        "mac",
+        "uuid"
+      ],
+      "additional_checks": [
+        "URL userinfo",
+        "URL query values",
+        "URL fragments"
+      ],
+      "excluded_local_session_identifiers": 3,
+      "validated_local_document_id_occurrences": 0,
+      "permitted_destination_addresses": {
+        "unique_count": 5,
+        "event_address_scopes": {
+          "ipv6_global": 308
+        },
+        "values_in_report": false
+      },
+      "redaction_placeholder_occurrences": {},
+      "limit": "Specified-pattern scan only; not proof that all possible private data is absent. Destination IP metadata remains in the local raw export."
+    },
+    "cli_direct_input": {
+      "command": "python3 -B scripts/audit_logs.py --json artifacts/privacy-audit-2026-11-17/device/13-saf-export.ndjson",
+      "exit_code": 0,
+      "renamed_or_copied_input": false
+    },
+    "cli_summary": {
+      "schema": "fkclaude.audit.summary.v1",
+      "view": "all_events",
+      "complete_input": true,
+      "input": {
+        "files_read": 1,
+        "bytes_read": 553903,
+        "lines_read": 1001,
+        "unique_valid_events": 1000,
+        "selected_events": 1000,
+        "duplicate_events": 0,
+        "export_manifests": 1,
+        "filtered_events": 0,
+        "file_errors": 0,
+        "non_jsonl_files_ignored": 0,
+        "duplicate_files_ignored": 0,
+        "symlinks_ignored": 0
+      },
+      "invalid": {},
+      "truncated": {
+        "incomplete_tail_lines": 0,
+        "valid_json_without_final_newline": 0,
+        "limits_reached": {
+          "bytes": false,
+          "events": false,
+          "files": false,
+          "directory_scan": false,
+          "sessions": false,
+          "endpoints": false,
+          "groups": false
+        }
+      },
+      "categories": {
+        "clipboard": 50,
+        "device": 134,
+        "integrity": 4,
+        "network": 414,
+        "packages": 309,
+        "system": 29,
+        "telemetry": 60
+      },
+      "actions": {
+        "activity_resumed": 2,
+        "analytics_batch": 4,
+        "analytics_context": 1,
+        "api_access": 403,
+        "audit_panel_open": 1,
+        "audit_panel_request": 4,
+        "audit_started": 1,
+        "connection_created": 9,
+        "coverage": 1,
+        "datagram_send": 2,
+        "dns_lookup": 30,
+        "environment_file_probe": 4,
+        "environment_policy": 1,
+        "hook_coverage": 15,
+        "http_request": 89,
+        "native_connect": 31,
+        "native_observer_installed": 1,
+        "native_sendto": 277,
+        "recording_changed": 3,
+        "sift_collect": 3,
+        "socket_connect": 28,
+        "system_property_read": 90
+      },
+      "outcomes": {
+        "attempted": 64,
+        "blocked": 4,
+        "called": 284,
+        "constructed": 1,
+        "disabled": 2,
+        "enabled": 1,
+        "failed": 24,
+        "installed": 2,
+        "observed": 4,
+        "requested": 4,
+        "response_received": 51,
+        "returned": 543,
+        "unavailable": 15,
+        "visible": 1
+      },
+      "network_phase_events": {
+        "attempted": 64,
+        "blocked": 4,
+        "called": 38,
+        "constructed": 1,
+        "failed": 4,
+        "response_received": 51,
+        "returned": 316
+      },
+      "correlation": {
+        "operation_groups": 336,
+        "groups_with_outcome": {
+          "attempted": 38,
+          "blocked": 0,
+          "response_received": 51,
+          "returned": 262,
+          "failed": 23
+        },
+        "network_events_without_local_correlation": 313,
+        "group_key": "session_id+document_id+view_id+request_id",
+        "scope": "selected_events_across_observed_layers",
+        "independent_upload_count": null
+      },
+      "native_io": {
+        "observed_calls_by_action": {
+          "native_connect": 31,
+          "native_sendto": 277
+        },
+        "observed_socket_return_bytes": {
+          "application": 200766,
+          "instrumentation": 0,
+          "unknown": 0
+        },
+        "return_events_with_bytes": {
+          "application": 276,
+          "instrumentation": 0,
+          "unknown": 0
+        },
+        "returns_without_valid_bytes": 0,
+        "queue_drop_reports": 0,
+        "queue_dropped_records_reported": 0,
+        "invalid_queue_drop_reports": 0,
+        "queue_counter_scope": "all_valid_unique_events_before_view_filter",
+        "meaning": "successful_socket_return_values_not_unique_traffic_or_server_receipts"
+      },
+      "sequence": {
+        "scope": "all_valid_unique_events_before_view_filter",
+        "sessions_tracked": 3,
+        "internal_missing_sequences": 0,
+        "sessions": [
+          {
+            "session": "session_001",
+            "observed": 366,
+            "first_seq": 440,
+            "last_seq": 805,
+            "starts_after_one": true,
+            "internal_missing_sequences": 0,
+            "first_gap_ranges": []
+          },
+          {
+            "session": "session_002",
+            "observed": 17,
+            "first_seq": 1,
+            "last_seq": 17,
+            "starts_after_one": false,
+            "internal_missing_sequences": 0,
+            "first_gap_ranges": []
+          },
+          {
+            "session": "session_003",
+            "observed": 617,
+            "first_seq": 1,
+            "last_seq": 617,
+            "starts_after_one": false,
+            "internal_missing_sequences": 0,
+            "first_gap_ranges": []
+          }
+        ],
+        "session_rows_omitted": 0
+      },
+      "recorder_counter_maxima": {
+        "queue_dropped": 0,
+        "disk_errors": 0,
+        "memory_evicted": 0,
+        "invalid_history": 0
+      },
+      "endpoints": [
+        {
+          "endpoint": "UNKNOWN claude.ai /:unknown",
+          "observation_events": 48,
+          "correlated_operations": 24,
+          "outcomes": {
+            "called": 24,
+            "returned": 24
+          }
+        },
+        {
+          "endpoint": "POST browser-intake-us5-datadoghq.com /api/v2/rum",
+          "observation_events": 19,
+          "correlated_operations": 10,
+          "outcomes": {
+            "attempted": 9,
+            "response_received": 10
+          }
+        },
+        {
+          "endpoint": "POST claude.ai /api/event_logging/v2/batch",
+          "observation_events": 12,
+          "correlated_operations": 6,
+          "outcomes": {
+            "attempted": 6,
+            "response_received": 6
+          }
+        },
+        {
+          "endpoint": "UNKNOWN firebaselogging.googleapis.com /:segment/log/batch",
+          "observation_events": 9,
+          "correlated_operations": 3,
+          "outcomes": {
+            "blocked": 3,
+            "called": 3,
+            "failed": 3
+          }
+        },
+        {
+          "endpoint": "POST browser-intake-us5-datadoghq.com /api/v2/spans",
+          "observation_events": 8,
+          "correlated_operations": 4,
+          "outcomes": {
+            "attempted": 4,
+            "response_received": 4
+          }
+        },
+        {
+          "endpoint": "POST claude.ai /:segment/:segment/:segment",
+          "observation_events": 8,
+          "correlated_operations": 5,
+          "outcomes": {
+            "attempted": 3,
+            "response_received": 5
+          }
+        },
+        {
+          "endpoint": "GET claude.ai /api/organizations/:id/:segment/settings",
+          "observation_events": 6,
+          "correlated_operations": 4,
+          "outcomes": {
+            "attempted": 2,
+            "response_received": 4
+          }
+        },
+        {
+          "endpoint": "POST claude.ai /v1/:segment/check",
+          "observation_events": 6,
+          "correlated_operations": 3,
+          "outcomes": {
+            "attempted": 3,
+            "response_received": 3
+          }
+        },
+        {
+          "endpoint": "UNKNOWN browser-intake-us5-datadoghq.com /:unknown",
+          "observation_events": 6,
+          "correlated_operations": 3,
+          "outcomes": {
+            "called": 3,
+            "returned": 3
+          }
+        },
+        {
+          "endpoint": "GET claude.ai /api/organizations/:id/:segment/v2/bootstrap",
+          "observation_events": 5,
+          "correlated_operations": 3,
+          "outcomes": {
+            "attempted": 2,
+            "response_received": 3
+          }
+        },
+        {
+          "endpoint": "POST claude.ai /api/organizations/:id/experiences/track",
+          "observation_events": 4,
+          "correlated_operations": 2,
+          "outcomes": {
+            "attempted": 2,
+            "response_received": 2
+          }
+        },
+        {
+          "endpoint": "UNKNOWN [ip] /:unknown",
+          "observation_events": 4,
+          "correlated_operations": 2,
+          "outcomes": {
+            "called": 2,
+            "returned": 2
+          }
+        },
+        {
+          "endpoint": "UNKNOWN [unknown] /event_logging/v2/batch",
+          "observation_events": 4,
+          "correlated_operations": 2,
+          "outcomes": {
+            "called": 2,
+            "returned": 2
+          }
+        },
+        {
+          "endpoint": "GET claude.ai /:segment",
+          "observation_events": 3,
+          "correlated_operations": 2,
+          "outcomes": {
+            "attempted": 1,
+            "response_received": 2
+          }
+        },
+        {
+          "endpoint": "GET claude.ai /api/bootstrap",
+          "observation_events": 3,
+          "correlated_operations": 2,
+          "outcomes": {
+            "attempted": 1,
+            "response_received": 2
+          }
+        },
+        {
+          "endpoint": "GET claude.ai /api/bootstrap/:segment/:segment",
+          "observation_events": 3,
+          "correlated_operations": 2,
+          "outcomes": {
+            "attempted": 1,
+            "response_received": 2
+          }
+        },
+        {
+          "endpoint": "GET claude.ai /api/organizations/:id/:segment",
+          "observation_events": 3,
+          "correlated_operations": 2,
+          "outcomes": {
+            "attempted": 1,
+            "response_received": 2
+          }
+        },
+        {
+          "endpoint": "GET claude.ai /api/organizations/:id/:segment/:segment",
+          "observation_events": 3,
+          "correlated_operations": 2,
+          "outcomes": {
+            "attempted": 1,
+            "response_received": 2
+          }
+        },
+        {
+          "endpoint": "GET claude.ai /api/organizations/:id/experiences",
+          "observation_events": 3,
+          "correlated_operations": 2,
+          "outcomes": {
+            "attempted": 1,
+            "response_received": 2
+          }
+        },
+        {
+          "endpoint": "POST claude.ai /api/organizations/:id/notification/:segment",
+          "observation_events": 3,
+          "correlated_operations": 2,
+          "outcomes": {
+            "attempted": 1,
+            "response_received": 2
+          }
+        },
+        {
+          "endpoint": "UNKNOWN time.google.com /:unknown",
+          "observation_events": 2,
+          "correlated_operations": 1,
+          "outcomes": {
+            "called": 1,
+            "returned": 1
+          }
+        }
+      ],
+      "endpoint_events_omitted": 0,
+      "unrecognized": {
+        "category_events": 0,
+        "action_events": 0,
+        "outcome_events": 0
+      },
+      "limitations": [
+        "Phase counts are observations. Multiple hooks and layers can describe one operation.",
+        "A response or positive socket return does not establish server storage or independent uploads.",
+        "Sequence gaps can reflect rotation, clearing, queue saturation, interrupted writes or missing files.",
+        "The observed process can alter its own logs; these files are not a trusted remote audit authority.",
+        "Only metadata is summarized. Payload values, file paths, session IDs and request IDs are omitted.",
+        "Recorder counters are maxima across manifests, not sums across potentially duplicate exports.",
+        "Native queue drops sum deduplicated drain deltas; zero means no drops reported in supplied files.",
+        "Missing export manifests leave Java recorder counters unknown; native drops are separate."
+      ]
+    }
+  },
+  "pause_refresh": {
+    "before_log": {
+      "artifact": "06-before-refresh-trigger.jsonl",
+      "bytes": 1547336,
+      "sha256": "359f281887783e8e19d02e9bf4c3a17d7aada67cb58ef015f87f68ccb9542e52",
+      "line_count": 2858,
+      "event_count": 2858,
+      "session_count": 4,
+      "pid_event_counts": {
+        "1730": 757,
+        "20102": 634,
+        "25287": 664,
+        "508": 803
+      },
+      "duplicate_session_sequence_keys": 0,
+      "invalid_event_counts": {},
+      "session_ranges": [
+        {
+          "session_alias": "session_001",
+          "event_count": 664,
+          "pids": [
+            25287
+          ],
+          "first_seq": 1,
+          "last_seq": 664,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_002",
+          "event_count": 803,
+          "pids": [
+            508
+          ],
+          "first_seq": 1,
+          "last_seq": 803,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_003",
+          "event_count": 634,
+          "pids": [
+            20102
+          ],
+          "first_seq": 1,
+          "last_seq": 634,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_004",
+          "event_count": 757,
+          "pids": [
+            1730
+          ],
+          "first_seq": 1,
+          "last_seq": 757,
+          "internal_missing_sequences": 0
+        }
+      ],
+      "final_newline": true
+    },
+    "after_log": {
+      "artifact": "07-after-refresh-trigger.jsonl",
+      "bytes": 1559365,
+      "sha256": "379ee4a2be95ddbbb27079b440e0abbbf9bfa66f04ee3d4f23ee82d47b8f728a",
+      "line_count": 2880,
+      "event_count": 2880,
+      "session_count": 4,
+      "pid_event_counts": {
+        "1730": 779,
+        "20102": 634,
+        "25287": 664,
+        "508": 803
+      },
+      "duplicate_session_sequence_keys": 0,
+      "invalid_event_counts": {},
+      "session_ranges": [
+        {
+          "session_alias": "session_001",
+          "event_count": 664,
+          "pids": [
+            25287
+          ],
+          "first_seq": 1,
+          "last_seq": 664,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_002",
+          "event_count": 803,
+          "pids": [
+            508
+          ],
+          "first_seq": 1,
+          "last_seq": 803,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_003",
+          "event_count": 634,
+          "pids": [
+            20102
+          ],
+          "first_seq": 1,
+          "last_seq": 634,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_004",
+          "event_count": 779,
+          "pids": [
+            1730
+          ],
+          "first_seq": 1,
+          "last_seq": 779,
+          "internal_missing_sequences": 0
+        }
+      ],
+      "final_newline": true
+    },
+    "before_bytes_are_after_prefix": true,
+    "log_delta": {
+      "added_events": 22,
+      "removed_event_keys": 0,
+      "changed_shared_events": 0,
+      "new_categories": {
+        "clipboard": 4,
+        "device": 2,
+        "network": 13,
+        "system": 3
+      },
+      "new_actions": {
+        "activity_resumed": 1,
+        "api_access": 6,
+        "audit_panel_request": 2,
+        "http_request": 6,
+        "native_sendto": 7
+      },
+      "new_outcomes": {
+        "attempted": 3,
+        "called": 3,
+        "observed": 1,
+        "requested": 2,
+        "response_received": 3,
+        "returned": 10
+      }
+    },
+    "before_ui": {
+      "artifact": "13-paused-list.xml",
+      "bytes": 13587,
+      "sha256": "5be5d533a97eb2c698695efd36a6c94174fe81a995e2242b6d21f366b02848db",
+      "list_count": 1,
+      "visible_list_children": [
+        5
+      ],
+      "list_content_signature_sha256": "09dc2a3c8422876eddc3bffa78b4f9ace87cb379b1f2cd5c8d7b405f35eea41b",
+      "recording_switch_checked": [
+        true
+      ],
+      "status_recording": true,
+      "status_stopped": false,
+      "status_list_paused": true,
+      "button_continue_refresh": true,
+      "button_pause_refresh": false
+    },
+    "after_ui": {
+      "artifact": "14-paused-after-trigger.xml",
+      "bytes": 13587,
+      "sha256": "a9ad5d4e7b7f87ece73e4c667babe1f1e1f805056b038aee85de222d508346ed",
+      "list_count": 1,
+      "visible_list_children": [
+        5
+      ],
+      "list_content_signature_sha256": "09dc2a3c8422876eddc3bffa78b4f9ace87cb379b1f2cd5c8d7b405f35eea41b",
+      "recording_switch_checked": [
+        true
+      ],
+      "status_recording": true,
+      "status_stopped": false,
+      "status_list_paused": true,
+      "button_continue_refresh": true,
+      "button_pause_refresh": false
+    },
+    "visible_list_content_unchanged": true,
+    "recording_remained_enabled_in_both_snapshots": true,
+    "both_ui_snapshots_mark_list_paused": true,
+    "conclusion": "The displayed list stayed unchanged while recording continued and appended 22 events; list refresh pause is independent of the recording switch."
+  },
+  "recording_off_across_restart": {
+    "before_log": {
+      "artifact": "11-fresh-disabled.jsonl",
+      "bytes": 1914642,
+      "sha256": "0656d59383ccbcae1e2c3fab8ae32667b822958ff288b7926c422a9f6fa69a7d",
+      "line_count": 3540,
+      "event_count": 3540,
+      "session_count": 6,
+      "pid_event_counts": {
+        "10143": 617,
+        "1730": 805,
+        "20102": 634,
+        "25287": 664,
+        "508": 803,
+        "8080": 17
+      },
+      "duplicate_session_sequence_keys": 0,
+      "invalid_event_counts": {},
+      "session_ranges": [
+        {
+          "session_alias": "session_001",
+          "event_count": 664,
+          "pids": [
+            25287
+          ],
+          "first_seq": 1,
+          "last_seq": 664,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_002",
+          "event_count": 803,
+          "pids": [
+            508
+          ],
+          "first_seq": 1,
+          "last_seq": 803,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_003",
+          "event_count": 634,
+          "pids": [
+            20102
+          ],
+          "first_seq": 1,
+          "last_seq": 634,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_004",
+          "event_count": 805,
+          "pids": [
+            1730
+          ],
+          "first_seq": 1,
+          "last_seq": 805,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_005",
+          "event_count": 17,
+          "pids": [
+            8080
+          ],
+          "first_seq": 1,
+          "last_seq": 17,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_006",
+          "event_count": 617,
+          "pids": [
+            10143
+          ],
+          "first_seq": 1,
+          "last_seq": 617,
+          "internal_missing_sequences": 0
+        }
+      ],
+      "final_newline": true
+    },
+    "after_log": {
+      "artifact": "12-off-confirmed.jsonl",
+      "bytes": 1914642,
+      "sha256": "0656d59383ccbcae1e2c3fab8ae32667b822958ff288b7926c422a9f6fa69a7d",
+      "line_count": 3540,
+      "event_count": 3540,
+      "session_count": 6,
+      "pid_event_counts": {
+        "10143": 617,
+        "1730": 805,
+        "20102": 634,
+        "25287": 664,
+        "508": 803,
+        "8080": 17
+      },
+      "duplicate_session_sequence_keys": 0,
+      "invalid_event_counts": {},
+      "session_ranges": [
+        {
+          "session_alias": "session_001",
+          "event_count": 664,
+          "pids": [
+            25287
+          ],
+          "first_seq": 1,
+          "last_seq": 664,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_002",
+          "event_count": 803,
+          "pids": [
+            508
+          ],
+          "first_seq": 1,
+          "last_seq": 803,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_003",
+          "event_count": 634,
+          "pids": [
+            20102
+          ],
+          "first_seq": 1,
+          "last_seq": 634,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_004",
+          "event_count": 805,
+          "pids": [
+            1730
+          ],
+          "first_seq": 1,
+          "last_seq": 805,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_005",
+          "event_count": 17,
+          "pids": [
+            8080
+          ],
+          "first_seq": 1,
+          "last_seq": 17,
+          "internal_missing_sequences": 0
+        },
+        {
+          "session_alias": "session_006",
+          "event_count": 617,
+          "pids": [
+            10143
+          ],
+          "first_seq": 1,
+          "last_seq": 617,
+          "internal_missing_sequences": 0
+        }
+      ],
+      "final_newline": true
+    },
+    "byte_identical": true,
+    "event_delta": {
+      "added_events": 0,
+      "removed_event_keys": 0,
+      "changed_shared_events": 0,
+      "new_categories": {},
+      "new_actions": {},
+      "new_outcomes": {}
+    },
+    "last_control": {
+      "pid": 10143,
+      "seq": 617,
+      "category": "system",
+      "action": "recording_changed",
+      "outcome": "disabled"
+    },
+    "exporting_pid_after_restart": 10951,
+    "new_pid_events_in_disabled_snapshot": 0,
+    "fresh_ui": {
+      "artifact": "18-off-confirmed.xml",
+      "bytes": 14310,
+      "sha256": "ff75eb45cf4fdc867d7ea9386403375e4e658af33f07f90bd6d8c73769ae654f",
+      "list_count": 1,
+      "visible_list_children": [
+        5
+      ],
+      "list_content_signature_sha256": "873dee4dbaf4a01ff8d51a64e4023495639b7828818ae9ac75b5b98407efad91",
+      "recording_switch_checked": [
+        false
+      ],
+      "status_recording": false,
+      "status_stopped": true,
+      "status_list_paused": false,
+      "button_continue_refresh": false,
+      "button_pause_refresh": true
+    },
+    "excluded_stale_ui_artifact": "16-off-after-restart.xml",
+    "conclusion": "Saved disk snapshots are byte-identical after recording was disabled in PID 10143; the later exporter is PID 10951 with enabled=false and no new PID 10951 event in the disabled snapshot. Fresh UI independently shows recording off."
+  },
+  "clear_and_resume": {
+    "cleared_log": {
+      "artifact": "15-cleared-confirmed.jsonl",
+      "bytes": 326,
+      "sha256": "df771050acd80041e22999f0ac87ca64d4cbf6a9569c6f155e5bdc25933f0103",
+      "line_count": 1,
+      "event_count": 1,
+      "session_count": 1,
+      "pid_event_counts": {
+        "10951": 1
+      },
+      "duplicate_session_sequence_keys": 0,
+      "invalid_event_counts": {},
+      "session_ranges": [
+        {
+          "session_alias": "session_001",
+          "event_count": 1,
+          "pids": [
+            10951
+          ],
+          "first_seq": 1,
+          "last_seq": 1,
+          "internal_missing_sequences": 0
+        }
+      ],
+      "final_newline": true
+    },
+    "resumed_log": {
+      "artifact": "16-resumed-final.jsonl",
+      "bytes": 10543,
+      "sha256": "3fcb7a2ec954573fdbbbf85a9dd6e9f1ef3ed3808997db91dd4327ef8dfd3964",
+      "line_count": 20,
+      "event_count": 20,
+      "session_count": 1,
+      "pid_event_counts": {
+        "10951": 20
+      },
+      "duplicate_session_sequence_keys": 0,
+      "invalid_event_counts": {},
+      "session_ranges": [
+        {
+          "session_alias": "session_001",
+          "event_count": 20,
+          "pids": [
+            10951
+          ],
+          "first_seq": 1,
+          "last_seq": 20,
+          "internal_missing_sequences": 0
+        }
+      ],
+      "final_newline": true
+    },
+    "clear_contains_only_control_event": true,
+    "cleared_file_is_prefix_of_resumed_file": true,
+    "old_session_intersection_count": 0,
+    "old_event_keys_returned": 0,
+    "clear_and_resumed_session_sets_equal": true,
+    "resumed_categories": {
+      "device": 2,
+      "network": 4,
+      "packages": 4,
+      "system": 3,
+      "telemetry": 7
+    },
+    "resumed_actions": {
+      "api_access": 6,
+      "audit_cleared": 1,
+      "audit_panel_open": 1,
+      "connection_created": 3,
+      "http_request": 4,
+      "native_sendto": 4,
+      "recording_changed": 1
+    },
+    "resumed_outcomes": {
+      "attempted": 2,
+      "blocked": 1,
+      "called": 4,
+      "enabled": 1,
+      "failed": 1,
+      "observed": 1,
+      "response_received": 2,
+      "returned": 7,
+      "visible": 1
+    },
+    "enabled_control_events": 1,
+    "resumed_failed_error_types": {
+      "IOException": 1
+    },
+    "reopened_ui": {
+      "artifact": "24-reopened-final.xml",
+      "bytes": 13645,
+      "sha256": "a56f6ba5c097b2f0a52a255b8bba3a91725cbd29e22b4942abd1e25b263a1c7f",
+      "list_count": 1,
+      "visible_list_children": [
+        5
+      ],
+      "list_content_signature_sha256": "86cfc7314f6edf89959cd89fa2d2fc0e3978f8491daac64ccf7cc3dc33d1c35d",
+      "recording_switch_checked": [
+        true
+      ],
+      "status_recording": true,
+      "status_stopped": false,
+      "status_list_paused": false,
+      "button_continue_refresh": false,
+      "button_pause_refresh": true
+    },
+    "privacy_scan": {
+      "scope": "raw_event_values_before_cli_redaction",
+      "events_checked": 20,
+      "detail_strings_checked": 138,
+      "pattern_hits": {},
+      "no_specified_pattern_matches": true,
+      "prohibited_detail_keys_checked": [
+        "access_token",
+        "android_id",
+        "authorization",
+        "body",
+        "clipboard",
+        "contacts",
+        "cookie",
+        "device_id",
+        "email",
+        "latitude",
+        "longitude",
+        "messages",
+        "password",
+        "payload",
+        "prompt",
+        "refresh_token",
+        "request_body",
+        "response_body",
+        "session_key",
+        "set-cookie"
+      ],
+      "pattern_families_checked": [
+        "api_key",
+        "bearer",
+        "email",
+        "hex_identifier",
+        "jwt",
+        "mac",
+        "uuid"
+      ],
+      "additional_checks": [
+        "URL userinfo",
+        "URL query values",
+        "URL fragments"
+      ],
+      "excluded_local_session_identifiers": 1,
+      "validated_local_document_id_occurrences": 0,
+      "permitted_destination_addresses": {
+        "unique_count": 2,
+        "event_address_scopes": {
+          "ipv6_global": 4
+        },
+        "values_in_report": false
+      },
+      "redaction_placeholder_occurrences": {},
+      "limit": "Specified-pattern scan only; not proof that all possible private data is absent. Destination IP metadata remains in the local raw export."
+    },
+    "conclusion": "Clear left exactly one control event. Resume retained that event and added new events in the same new session; no pre-clear session or event key returned. The reopened UI shows recording enabled."
+  },
+  "regression_tests": {
+    "command": "python3 -B -m unittest discover -s tests -p test_audit_logs.py -v",
+    "passed": 14,
+    "failed": 0,
+    "log_artifact": "artifacts/privacy-audit-2026-11-17/device/ndjson-python-tests.log",
+    "new_coverage": "SAF .ndjson main() entrypoint and .ndjson.1 directory discovery; original input format preserved."
+  },
+  "limitations": [
+    "These are local saved-artifact observations, not a trusted external audit authority; the observed process can alter its logs.",
+    "File equality establishes no appended persisted events in the compared artifacts, not absence of application behavior outside recorded coverage.",
+    "The 1000 exported events include historical sessions and must not be described as 1000 events generated by PID 10951.",
+    "Zero exporter counters are current-process values; they do not retrospectively certify historical sessions or excluded older events.",
+    "Pattern scans are bounded checks; permitted remote destination IP values remain only in raw local logs.",
+    "Request stages, correlated operation groups and socket return bytes are distinct measurements, not independent upload totals.",
+    "The saved artifacts and operator capture sequence provide restart and UI context; no new live device state was queried."
+  ]
+}

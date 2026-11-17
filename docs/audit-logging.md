@@ -1,16 +1,26 @@
 # 本地行为审计
 
-审计分别记录应用读取的接口、请求目标和请求结果。弹窗与命令行分析器共用 `fkclaude.audit.v1` JSONL 事件。
+审计分别记录应用调用的接口、请求目标和请求结果。弹窗与命令行分析器共用 `fkclaude.audit.v1` 事件；`.jsonl` 与 `.ndjson` 都按每行一个 JSON 对象保存。
 
 ## 使用
 
 1. 在 LSPosed／Vector 中启用 fkclaude，作用域选择 Claude，并完全重启 Claude。
 2. 在模块设置页点“打开 Claude 行为审计”，或点 Claude 内可拖动的“审计”入口。
-3. 按接口、动作、主机、路径模板和状态搜索，或按类别过滤。点击事件查看完整 JSON。
-4. “记录”开关控制采集；“暂停刷新”只冻结列表。关闭弹窗后仍可从入口打开。
-5. 导出通过 Android 系统文件选择器保存脱敏 JSONL；清空会先确认。
+3. 在“搜索接口、域名或字段”中输入关键词，或通过“全部类别”选择分类。搜索匹配脱敏后的原始 JSON，可使用接口名、动作、主机或路径模板；点击事件查看完整 JSON。
+4. 首次使用默认开启“记录”；开关状态会保存并在重启后保持。普通启动显示“审计”入口，从模块设置页明确请求打开审计时会展开弹窗。
+5. 点“导出”后选择保存位置。实机系统文件选择器保存为 `.ndjson`，下文 CLI 可直接读取，无须改名。其他文件提供器可能采用 `.jsonl`，两种后缀均受支持。
 
-审计开关与环境覆盖开关独立。停用 LSPosed 模块并重启 Claude 后，两者均停止。环境配置继续使用原有的保存／重启流程。
+| 控件 | 实际作用 |
+| --- | --- |
+| “记录” | 开启或停止新增应用行为记录；关闭后仍可浏览、搜索和导出已保留记录。开关变化本身保留为审计控制事件。 |
+| “暂停刷新”／“继续刷新” | 暂停或恢复列表更新，不改变“记录”开关，也不暂停后台记录。 |
+| “收起” | 关闭弹窗，不改变记录状态；之后仍可点“审计”入口重新打开。 |
+| “仅非对话网络” | 按 `network`、`telemetry`、`integrity`、`webview` 类别筛选。列表可能包含 DNS、连接和事件构造等前置行为，是否发生上传仍需结合动作与结果判断。 |
+| “清空” | 先弹出确认，再清除本地保留日志；不会删除已经导出到其他位置的文件。 |
+
+审计开关与环境覆盖开关独立：停止记录不会撤销既有环境保护。停用 LSPosed 模块并重启 Claude 后，两者均停止。环境配置继续使用原有的保存／重启流程。
+
+控件实现见 [AuditPanel](../app/src/main/java/io/github/lightjunction/fkclaude/AuditPanel.java)，本版本验证范围见 [0.4.1 验证记录](validation-0.4.1.md)。
 
 ## 事件语义
 
@@ -22,7 +32,7 @@
 | `blocked` | fkclaude 规则阻止了这次操作 |
 | `returned` | 被观察方法正常返回，需要结合观察层解释 |
 | `response_received` | HTTP 层取得响应；服务端后续处理仍不可见 |
-| `failed` | 调用抛出异常，仅保留异常类型 |
+| `failed` | 调用失败；Java／HTTP 保留异常类型，原生 socket 保留返回值与 errno |
 | `queue_result` | beacon 排队结果，见 `phase`；不代表 HTTP 响应 |
 
 同一请求可有多行记录。入队、HTTP 和 socket 写出是不同观察层，不能将各层记录数相加当成独立上传次数。
@@ -55,11 +65,15 @@ WebView 脚本在环境覆盖脚本后注册。页面可自行伪造网页报告
 
 ## CLI 分析
 
+[分析器](../scripts/audit_logs.py) 可直接读取 `.ndjson`、`.jsonl` 及其轮转、gzip 文件。传入目录时匹配 `*.jsonl*` 和 `*.ndjson*`；保留系统文件选择器生成的文件名即可。
+
 ```sh
-python3 scripts/audit_logs.py /path/to/audit.jsonl
-python3 scripts/audit_logs.py /path/to/audit.jsonl --json
+python3 scripts/audit_logs.py /path/to/audit.ndjson
+python3 scripts/audit_logs.py /path/to/audit.ndjson --json
 python3 scripts/audit_logs.py /path/to/audit-directory --non-conversation
 ```
+
+默认输出中文摘要；`--json` 输出 `fkclaude.audit.summary.v1` 机器可读汇总。弹窗导出文件首行是保留范围与丢弃计数等元数据，其后为事件，分析器会分别处理。
 
 分析器无第三方依赖，检查格式、重复、冲突、序号内部缺口和不完整尾行，分开统计请求阶段、HTTP 响应、阻断与原生字节。它使用进程会话、文档、视图及请求标识联合关联，不将不同页面的 w1 合并。输入和输出均有明确上限，异常或截断返回码 2。
 

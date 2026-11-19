@@ -314,7 +314,7 @@ public final class AuditLog {
                         byte[] bytes = (pending.entry().json() + "\n").getBytes(StandardCharsets.UTF_8);
                         if (stream == null) {
                             if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("Audit directory unavailable");
-                            fileSize = file(0).length();
+                            fileSize = AuditFileAppender.prepare(file(0));
                             stream = new BufferedOutputStream(new FileOutputStream(file(0), true), 16384);
                         }
                         if (fileSize + bytes.length > MAX_FILE_BYTES) {

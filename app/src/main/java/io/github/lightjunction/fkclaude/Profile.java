@@ -27,7 +27,11 @@ public final class Profile {
                 throw new IllegalArgumentException("Invalid value: " + entry.getKey());
             validate(entry.getKey(), entry.getValue());
         }
-        values = Collections.unmodifiableMap(new HashMap<>(source));
+        values = Collections.unmodifiableMap(UsPrivacyPolicy.enforce(source));
+        for (var entry : values.entrySet()) {
+            if (entry.getValue().length() > 4096) throw new IllegalArgumentException("Expanded profile field too large");
+            validate(entry.getKey(), entry.getValue());
+        }
         Map<String, String> properties = PropertyView.parse(get("system_properties", ""));
         for (String[] binding : PropertyView.BINDINGS)
             if (!has(binding[1]) && properties.containsKey(binding[0])) validate(binding[1], properties.get(binding[0]));
@@ -88,16 +92,20 @@ public final class Profile {
         map.put("local_ip", "");
         map.put("network_mac", "02:00:00:00:00:00");
         // Browser intake hosts are hyphenated, not subdomains of datadoghq.com (q8g in the sample).
-        map.put("blocked_hosts", "sentry.io,datadoghq.com,datadoghq.eu,"
-                + "browser-intake-datadoghq.com,browser-intake-datadoghq.eu,"
-                + "browser-intake-us3-datadoghq.com,browser-intake-us5-datadoghq.com,"
-                + "browser-intake-ap1-datadoghq.com,browser-intake-ap2-datadoghq.com,browser-intake-uk1-datadoghq.com,"
-                + "browser-intake-ddog-gov.com,browser-intake-us2-ddog-gov.com,browser-intake-datad0g.com,"
-                + "firebaselogging.googleapis.com,firebaselogging-pa.googleapis.com,app-measurement.com");
+        map.put("blocked_hosts", UsPrivacyPolicy.TELEMETRY_HOSTS);
         if (existing != null) {
             for (String key : new String[]{"claude_device_id", "android_id"}) if (existing.has(key)) map.put(key, existing.get(key));
-            existing.copy().forEach((key, value) -> { if (key.startsWith("ip_guard_")) map.put(key, value); });
+            existing.copy().forEach((key, value) -> { if (key.startsWith("ip_guard_") || key.equals("privacy_us_only")) map.put(key, value); });
+            if (existing.flag("privacy_us_only")) map.putAll(existing.copy());
         }
+        return new Profile(map);
+    }
+
+    /** Explicit opt-in policy; an empty exit allowlist stays blocked. */
+    public static Profile usPrivacy(Profile existing) {
+        Map<String, String> map = defaults(existing).copy();
+        if (existing != null) map.putAll(existing.copy());
+        map.put("privacy_us_only", "true");
         return new Profile(map);
     }
 

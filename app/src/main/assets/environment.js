@@ -47,15 +47,35 @@
       define(navigator, 'userAgentData', Object.freeze(data));
     }
     if (on('block_location') || own('latitude') || own('longitude')) {
-      const answer = (ok, error) => queueMicrotask(() => {
+      const answer = (ok, error, active = () => true) => queueMicrotask(() => {
+        if (!active()) return;
         if (on('block_location')) { if (typeof error === 'function') error({code:1, message:'', PERMISSION_DENIED:1}); }
         else if (typeof ok === 'function') ok({timestamp:Date.now(), coords:{latitude:number('latitude') || 0,
           longitude:number('longitude') || 0, accuracy:number('location_accuracy') || 0, altitude:null,
           altitudeAccuracy:null, heading:null, speed:null}});
       });
       let watch = 0;
-      define(navigator, 'geolocation', Object.freeze({getCurrentPosition:answer,
-        watchPosition:(ok, error) => { answer(ok, error); return ++watch; }, clearWatch:() => {}}));
+      const pending = new Set();
+      define(navigator, 'geolocation', Object.freeze({
+        getCurrentPosition:(ok, error) => answer(ok, error),
+        watchPosition:(ok, error) => {
+          const id = ++watch; pending.add(id);
+          answer(ok, error, () => pending.delete(id));
+          return id;
+        },
+        clearWatch:id => { pending.delete(id); }
+      }));
+      if (on('block_location') && navigator.permissions && typeof navigator.permissions.query === 'function') {
+        const originalQuery = navigator.permissions.query;
+        replace(navigator.permissions, 'query', function(descriptor) {
+          if (descriptor && descriptor.name === 'geolocation') {
+            const status = typeof EventTarget === 'function' ? new EventTarget() : {};
+            Object.defineProperties(status, {state:{value:'denied', enumerable:true}, onchange:{value:null, writable:true}});
+            return Promise.resolve(status);
+          }
+          return Reflect.apply(originalQuery, this, [descriptor]);
+        });
+      }
     }
     if (on('block_web_fingerprinting')) {
       define(navigator, 'gpu', undefined);

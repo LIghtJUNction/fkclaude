@@ -11,6 +11,7 @@ function environment(config = {}) {
     Object.assign(Navigator.prototype, {language:'real', languages:['real'], platform:'real', vendor:'real', userAgent:'real',
       hardwareConcurrency:19, deviceMemory:31, gpu:{real:true}, plugins:['real'], mimeTypes:['real'],
       mediaDevices:{enumerateDevices:async()=>['real-device']},
+      permissions:{query:async descriptor=>{if(descriptor.name==='geolocation') throw Error('native permission queried');return {state:'prompt'}}},
       userAgentData:{brands:[{brand:'Real',version:'999'}],mobile:true,getHighEntropyValues:()=>{throw Error('real entropy requested')}},
       geolocation:{getCurrentPosition:()=>{throw Error('real location requested')}}});
     globalThis.navigator=new Navigator();
@@ -87,4 +88,31 @@ test('location blocking and custom locations never invoke the original provider'
   const custom = environment({latitude:'12.5',longitude:'-30',location_accuracy:'5'});
   const position = await custom('new Promise(resolve=>navigator.geolocation.getCurrentPosition(resolve))');
   assert.equal(position.coords.latitude, 12.5); assert.equal(position.coords.longitude, -30);
+});
+
+test('clearing a geolocation watch cancels its queued result', async () => {
+  for (const config of [{block_location:'true'}, {latitude:'40.7',longitude:'-74'}]) {
+    const run = environment(config);
+    run('globalThis.callbacks=0; const id=navigator.geolocation.watchPosition(()=>callbacks++,()=>callbacks++); navigator.geolocation.clearWatch(id)');
+    await new Promise(resolve => queueMicrotask(resolve));
+    assert.equal(run('callbacks'), 0);
+  }
+});
+
+test('location denial is asynchronous and explicit permission queries agree', async () => {
+  const run = environment({block_location:'true'});
+  run('globalThis.result="pending"; navigator.geolocation.getCurrentPosition(()=>result="unexpected",error=>result=error.code)');
+  assert.equal(run('result'), 'pending');
+  await new Promise(resolve => queueMicrotask(resolve));
+  assert.equal(run('result'), 1);
+  assert.equal((await run('navigator.permissions.query({name:"geolocation"})')).state, 'denied');
+  assert.equal((await run('navigator.permissions.query({name:"notifications"})')).state, 'prompt');
+});
+
+test('live geolocation watch completes once without invoking the native provider', async () => {
+  const run = environment({block_location:'true'});
+  run('globalThis.callbacks=0; globalThis.code=0; navigator.geolocation.watchPosition(()=>callbacks+=100,error=>{callbacks++;code=error.code})');
+  await new Promise(resolve => queueMicrotask(resolve));
+  assert.equal(run('callbacks'), 1);
+  assert.equal(run('code'), 1);
 });

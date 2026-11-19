@@ -123,4 +123,7 @@
     <string name="audit_entry_note">Browse local, redacted events inside Claude. The audit panel has its own recording switch, independent of environment overrides. Restart Claude after upgrading this module.</string>
     <string name="audit_not_installed">Claude is not installed.</string>
     <string name="audit_open_error">Unable to open Claude. Check that it is enabled.</string>
+    <string name="us_privacy_preset">Apply US privacy profile</string>
+    <string name="field_privacy_us_only">US-only privacy policy</string>
+    <string name="us_privacy_note">US privacy blocks device location and uses US region settings inside Claude. Internet access requires the probe to report a US exit and match the IP allowlist. This does not set up a VPN; an empty allowlist stays offline. Disable US-only policy before changing its required protections.</string>
 </resources>

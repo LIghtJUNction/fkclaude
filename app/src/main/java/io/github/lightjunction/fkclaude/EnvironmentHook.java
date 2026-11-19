@@ -43,6 +43,22 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
     private final Set<String> reported = Collections.synchronizedSet(new HashSet<>());
     private final Map<String, String> androidProperties = new HashMap<>();
     private final Map<String, String> javaProperties = new HashMap<>();
+    private static final Set<String> REQUIRED_US_HOOKS = Set.of(
+            "android.location.LocationManager#getLastKnownLocation",
+            "android.location.LocationManager#getCurrentLocation",
+            "android.location.LocationManager#requestLocationUpdates",
+            "android.location.Location#getLatitude", "android.location.Location#getLongitude",
+            "android.location.Location#writeToParcel",
+            "java.util.Locale#getDefault", "java.util.TimeZone#getDefault",
+            "android.icu.util.ULocale#getDefault", "android.icu.util.TimeZone#getDefault",
+            "android.os.LocaleList#getDefault", "android.os.LocaleList#getAdjustedDefault",
+            "android.content.res.Resources#getConfiguration",
+            "android.telephony.TelephonyManager#getNetworkCountryIso",
+            "android.telephony.TelephonyManager#getSimCountryIso",
+            "android.provider.Settings$Secure#getString",
+            "android.net.wifi.WifiInfo#getSSID", "android.net.wifi.WifiInfo#getBSSID",
+            "android.net.wifi.WifiInfo#getMacAddress");
+    private final Set<String> installedPolicyHooks = new HashSet<>();
     @FunctionalInterface private interface Action { void run(XC_MethodHook.MethodHookParam param) throws Throwable; }
     @Override public void initZygote(StartupParam param) { modulePath = param.modulePath; }
 
@@ -91,12 +107,26 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             AuditNative.install(profile.flag("ip_guard_enabled"));
             AuditLog.record("system", "environment_policy", "EnvironmentHook", "observed",
                     Map.of("phase", profile.enabled() ? "modified_environment" : "environment_disabled",
-                            "reason", "sift_block=" + profile.flag("block_sift") + ";ip_guard=" + profile.flag("ip_guard_enabled")));
-            if (version != Profile.TARGET_VERSION) { log("unsupported environment version; IP guard remains independent"); return; }
+                            "reason", "sift_block=" + profile.flag("block_sift") + ";ip_guard=" + profile.flag("ip_guard_enabled")
+                                     + ";us_only=" + profile.flag("privacy_us_only")));
+            // Standard privacy controls remain active even when targeted app hooks are unavailable.
+            if (profile.flag("privacy_us_only")) {
+                installPlatformPrivacy(loader);
+                selfCheck(context);
+            }
+            if (version != Profile.TARGET_VERSION) {
+                if (profile.flag("privacy_us_only")) {
+                    AuditLog.record("system", "privacy_policy", "EnvironmentHook", "blocked",
+                            Map.of("reason", "unsupported_target_version"));
+                    log("strict privacy blocked: unsupported_target_version");
+                    throw new IllegalStateException("Unsupported target privacy version");
+                }
+                log("unsupported environment version; IP guard remains independent"); return;
+            }
             if (!profile.enabled()) { log("environment disabled; IP guard remains independent"); return; }
             install(context, loader);
             log("installed " + hookCount + " hooks for target version " + version);
-            selfCheck(context);
+            if (!profile.flag("privacy_us_only")) selfCheck(context);
         } catch (Throwable e) {
             log("initialization failed: " + e.getClass().getSimpleName());
             StackTraceElement[] frames = e.getStackTrace();
@@ -124,28 +154,70 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             checks++;
             if (java.util.Objects.equals(entry.getValue().isEmpty() ? null : entry.getValue(), System.getenv(entry.getKey()))) passed++;
         }
+        if (profile.flag("privacy_us_only")) {
+            Locale configured = Locale.forLanguageTag(profile.get("locale"));
+            checks++;
+            if (android.icu.util.ULocale.forLocale(configured).equals(android.icu.util.ULocale.getDefault())) passed++;
+            checks++;
+            if (profile.get("timezone").equals(android.icu.util.TimeZone.getDefault().getID())) passed++;
+            Configuration config = context.getResources().getConfiguration();
+            checks++;
+            if (config.mcc == 0 && config.mnc == 0 && !config.getLocales().isEmpty()
+                    && configured.equals(config.getLocales().get(0))) passed++;
+            android.telephony.TelephonyManager phone = context.getSystemService(android.telephony.TelephonyManager.class);
+            checks++;
+            if (phone != null && profile.get("sim_country").equals(phone.getSimCountryIso())) passed++;
+            checks++;
+            if (phone != null && profile.get("network_country").equals(phone.getNetworkCountryIso())) passed++;
+            // Synthetic values only: verify blocked accessors without requesting a real device fix.
+            android.location.Location synthetic = new android.location.Location("fkclaude-policy-check");
+            android.location.Location other = new android.location.Location("fkclaude-policy-check");
+            checks++;
+            if (locationReadDenied(() -> synthetic.getLatitude())) passed++;
+            checks++;
+            if (locationReadDenied(() -> synthetic.getLongitude())) passed++;
+            checks++;
+            if (locationReadDenied(() -> synthetic.distanceTo(other))) passed++;
+            checks++;
+            if (locationReadDenied(() -> synthetic.bearingTo(other))) passed++;
+        }
         log("readback self-check: passed=" + passed + " checked=" + checks + "; no values logged");
+        if (profile.flag("privacy_us_only") && passed != checks)
+            throw new IllegalStateException("Privacy readback verification failed");
     }
 
-    private void install(Context context, ClassLoader loader) throws Throwable {
+    private static boolean locationReadDenied(Runnable query) {
+        try { query.run(); return false; }
+        catch (SecurityException expected) { return true; }
+    }
+
+    private void installPlatformPrivacy(ClassLoader loader) throws Throwable {
         buildProperties(loader);
         NativeBridge.install(profile, androidProperties);
         environmentAndCommands(loader);
-        identity(loader);
+        androidIdentity(loader);
         locale(loader);
         network(loader);
         privateData(loader);
+        WebEnvironment.install(profile, modulePath);
+        if (profile.flag("privacy_us_only") && !installedPolicyHooks.containsAll(REQUIRED_US_HOOKS))
+            throw new IllegalStateException("Required privacy hooks missing");
+    }
+
+    private void install(Context context, ClassLoader loader) throws Throwable {
+        if (!profile.flag("privacy_us_only")) installPlatformPrivacy(loader);
+        identity(loader);
         screen(loader);
         battery(loader);
         resources(loader);
         diagnostics(loader);
         sift(loader);
         outbound(loader);
-        WebEnvironment.install(profile, modulePath);
     }
 
     private void hook(String cls, ClassLoader loader, String name, boolean before, Action action) {
         String signature = cls + "#" + name;
+        int installed = 0;
         try {
             Class<?> type = XposedHelpers.findClass(cls, loader);
             Set<XC_MethodHook.Unhook> hooks = XposedBridge.hookAllMethods(type, name, new XC_MethodHook() {
@@ -154,16 +226,22 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
                     try { action.run(param); }
                     catch (Throwable e) {
                         if (reported.add(signature + ":runtime")) log("hook failed: " + signature + " (" + e.getClass().getSimpleName() + ")");
+                        if (profile.flag("privacy_us_only"))
+                            param.setThrowable(new SecurityException("Privacy interception unavailable"));
                     }
                 }
                 @Override protected void beforeHookedMethod(MethodHookParam param) { if (before) invoke(param); }
                 @Override protected void afterHookedMethod(MethodHookParam param) { if (!before) invoke(param); }
             });
-            hookCount += hooks.size();
+            installed = hooks.size();
+            hookCount += installed;
+            if (installed > 0 && REQUIRED_US_HOOKS.contains(signature)) installedPolicyHooks.add(signature);
             if (hooks.isEmpty() && reported.add(signature)) log("unavailable: " + signature);
         } catch (Throwable e) {
             if (reported.add(signature)) log("unavailable: " + signature);
         }
+        if (installed == 0 && profile.flag("privacy_us_only") && REQUIRED_US_HOOKS.contains(signature))
+            throw new IllegalStateException("Required privacy hook unavailable: " + signature);
     }
     private void value(String cls, ClassLoader loader, String name, String key) {
         if (!profile.has(key)) return;
@@ -269,6 +347,8 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
                 hookCount++;
             } catch (Throwable e) { log("analytics ID consumer unavailable"); }
         }
+    }
+    private void androidIdentity(ClassLoader loader) {
         if (profile.has("android_id")) for (String method : new String[]{"getString", "getStringForUser"})
             hook("android.provider.Settings$Secure", loader, method, true, p -> {
                 if (p.args.length >= 2 && "android_id".equals(p.args[1])) p.setResult(profile.get("android_id"));
@@ -280,14 +360,26 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             hook("java.util.Locale", loader, "getDefault", true, p -> p.setResult(configured));
             for (String method : new String[]{"getDefault", "getAdjustedDefault"})
                 hook("android.os.LocaleList", loader, method, true, p -> p.setResult(new LocaleList(configured)));
+            android.icu.util.ULocale icu = android.icu.util.ULocale.forLocale(configured);
+            hook("android.icu.util.ULocale", loader, "getDefault", true, p -> p.setResult(icu));
+        }
+        if (profile.has("locale") || profile.flag("block_location")) {
             hook("android.content.res.Resources", loader, "getConfiguration", false, p -> {
                 Configuration copy = new Configuration((Configuration) p.getResult());
-                copy.setLocales(new LocaleList(configured)); copy.setLayoutDirection(configured); p.setResult(copy);
+                if (profile.has("locale")) {
+                    Locale configured = Locale.forLanguageTag(profile.get("locale"));
+                    copy.setLocales(new LocaleList(configured)); copy.setLayoutDirection(configured);
+                }
+                if (profile.flag("block_location")) { copy.mcc = 0; copy.mnc = 0; }
+                p.setResult(copy);
             });
         }
         if (profile.has("timezone")) {
             TimeZone configured = TimeZone.getTimeZone(profile.get("timezone"));
-            hook("java.util.TimeZone", loader, "getDefault", true, p -> p.setResult(configured.clone()));
+            for (String method : new String[]{"getDefault", "getDefaultRef"})
+                hook("java.util.TimeZone", loader, method, true, p -> p.setResult(configured.clone()));
+            android.icu.util.TimeZone icu = android.icu.util.TimeZone.getTimeZone(profile.get("timezone"));
+            hook("android.icu.util.TimeZone", loader, "getDefault", true, p -> p.setResult(icu.clone()));
         }
     }
     private void network(ClassLoader loader) {
@@ -363,26 +455,40 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
     private void privateData(ClassLoader loader) {
         if (profile.flag("block_location")) {
             hook("android.location.LocationManager", loader, "getLastKnownLocation", true, p -> p.setResult(null));
-            for (String name : new String[]{"requestLocationUpdates", "requestSingleUpdate"})
+            for (String name : new String[]{"requestLocationUpdates", "requestSingleUpdate", "addProximityAlert"})
                 hook("android.location.LocationManager", loader, name, true, p -> p.setResult(null));
+            for (String name : new String[]{"getAllProviders", "getProviders"})
+                hook("android.location.LocationManager", loader, name, true, p -> p.setResult(Collections.emptyList()));
+            hook("android.location.LocationManager", loader, "getBestProvider", true, p -> p.setResult(null));
+            for (String name : new String[]{"isLocationEnabled", "isProviderEnabled", "addNmeaListener",
+                    "addGpsStatusListener", "registerGnssStatusCallback", "registerGnssMeasurementsCallback",
+                    "registerGnssNavigationMessageCallback", "registerGnssBatchedLocationCallback"})
+                hook("android.location.LocationManager", loader, name, true, p -> p.setResult(false));
             hook("android.location.LocationManager", loader, "getCurrentLocation", true, p -> {
+                // Suppress the provider BEFORE inspecting args or invoking any user-supplied executor.
+                p.setResult(null);
                 java.util.concurrent.Executor executor = null;
                 java.util.function.Consumer<android.location.Location> consumer = null;
+                android.os.CancellationSignal cancellation = null;
                 for (Object arg : p.args) {
                     if (arg instanceof java.util.concurrent.Executor e) executor = e;
+                    if (arg instanceof android.os.CancellationSignal signal) cancellation = signal;
                     if (arg instanceof java.util.function.Consumer<?> c) {
                         @SuppressWarnings("unchecked") var typed = (java.util.function.Consumer<android.location.Location>) c;
                         consumer = typed;
                     }
                 }
-                if (executor != null && consumer != null) {
-                    var callback = consumer; executor.execute(() -> callback.accept(null)); p.setResult(null);
-                }
+                var signal = cancellation;
+                LocationPrivacy.unavailable(executor, () -> signal != null && signal.isCanceled(), consumer);
             });
-            // Covers Location values originating from other providers at these Java accessors.
-            for (String method : new String[]{"getLatitude", "getLongitude", "getAltitude"})
-                hook("android.location.Location", loader, method, true, p -> p.setResult(0d));
+            // A bogus (0,0) fix is still a location. Deny access instead of inventing coordinates.
+            for (String method : new String[]{"getLatitude", "getLongitude", "getAltitude",
+                    "getMslAltitudeMeters", "writeToParcel", "distanceTo", "bearingTo", "dump"})
+                hook("android.location.Location", loader, method, true,
+                        p -> p.setThrowable(new SecurityException("Location unavailable by privacy policy")));
             hook("android.location.Location", loader, "getExtras", true, p -> p.setResult(null));
+            hook("android.location.Location", loader, "toString", true, p -> p.setResult("Location[unavailable]"));
+            locationSideChannels(loader);
         } else {
             value("android.location.Location", loader, "getLatitude", "latitude");
             value("android.location.Location", loader, "getLongitude", "longitude");
@@ -419,6 +525,144 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
                 }
                 p.setResult(filtered);
             });
+    }
+
+    private void locationSideChannels(ClassLoader loader) {
+        for (String method : new String[]{"getAllCellInfo", "getNeighboringCellInfo"})
+            hook("android.telephony.TelephonyManager", loader, method, true, p -> p.setResult(Collections.emptyList()));
+        for (String method : new String[]{"getCellLocation", "getServiceState"})
+            hook("android.telephony.TelephonyManager", loader, method, true, p -> p.setResult(null));
+        for (String method : new String[]{"listen", "registerTelephonyCallback"})
+            hook("android.telephony.TelephonyManager", loader, method, true, p -> p.setResult(null));
+        hook("android.telephony.TelephonyManager", loader, "requestCellInfoUpdate", true, p -> {
+            p.setResult(null);
+            java.util.concurrent.Executor executor = null;
+            android.telephony.TelephonyManager.CellInfoCallback callback = null;
+            for (Object arg : p.args) {
+                if (arg instanceof java.util.concurrent.Executor e) executor = e;
+                if (arg instanceof android.telephony.TelephonyManager.CellInfoCallback c) callback = c;
+            }
+            if (executor != null && callback != null) {
+                var target = callback; executor.execute(() -> target.onCellInfo(Collections.emptyList()));
+            }
+        });
+        for (String method : new String[]{"getActiveSubscriptionInfoList", "getAvailableSubscriptionInfoList",
+                "getAccessibleSubscriptionInfoList", "getAllSubscriptionInfoList", "getCompleteActiveSubscriptionInfoList"})
+            hook("android.telephony.SubscriptionManager", loader, method, true, p -> p.setResult(Collections.emptyList()));
+        for (String method : new String[]{"getActiveSubscriptionInfo", "getActiveSubscriptionInfoForSimSlotIndex",
+                "getActiveSubscriptionInfoForIccIndex"})
+            hook("android.telephony.SubscriptionManager", loader, method, true, p -> p.setResult(null));
+        hook("android.telephony.SubscriptionInfo", loader, "getCountryIso", true,
+                p -> p.setResult(profile.get("sim_country", "")));
+        for (String method : new String[]{"getMccString", "getMncString"})
+            hook("android.telephony.SubscriptionInfo", loader, method, true, p -> p.setResult(""));
+        for (String method : new String[]{"getMcc", "getMnc"})
+            hook("android.telephony.SubscriptionInfo", loader, method, true, p -> p.setResult(0));
+        for (String method : new String[]{"getScanResults", "getConfiguredNetworks", "getPrivilegedConfiguredNetworks"})
+            hook("android.net.wifi.WifiManager", loader, method, true, p -> p.setResult(Collections.emptyList()));
+        hook("android.net.wifi.WifiManager", loader, "startScan", true, p -> p.setResult(false));
+        for (String method : new String[]{"getWifiSsid", "getPasspointFqdn", "getPasspointProviderFriendlyName",
+                "getApMldMacAddress"})
+            hook("android.net.wifi.WifiInfo", loader, method, true, p -> p.setResult(null));
+        for (String method : new String[]{"getInformationElements", "getAffiliatedMloLinks", "getAssociatedMloLinks"})
+            hook("android.net.wifi.WifiInfo", loader, method, true, p -> p.setResult(Collections.emptyList()));
+        hook("android.net.wifi.WifiInfo", loader, "writeToParcel", true,
+                p -> p.setThrowable(new SecurityException("Wi-Fi details unavailable by privacy policy")));
+        hook("android.net.wifi.WifiInfo", loader, "toString", true, p -> p.setResult("WifiInfo[unavailable]"));
+        for (String method : new String[]{"getSSID", "getBSSID", "getMacAddress"})
+            hook("android.net.wifi.WifiInfo", loader, method, true, p -> p.setResult(
+                    method.equals("getSSID") ? "<unknown ssid>" : "02:00:00:00:00:00"));
+        hook("android.net.wifi.rtt.WifiRttManager", loader, "startRanging", true,
+                p -> p.setThrowable(new SecurityException("Nearby ranging unavailable by privacy policy")));
+        hook("android.net.wifi.aware.WifiAwareManager", loader, "attach", true,
+                p -> p.setThrowable(new SecurityException("Nearby discovery unavailable by privacy policy")));
+        for (String method : new String[]{"startDiscovery", "startLeScan"})
+            hook("android.bluetooth.BluetoothAdapter", loader, method, true, p -> p.setResult(false));
+        hook("android.bluetooth.BluetoothAdapter", loader, "getBondedDevices", true,
+                p -> p.setResult(Collections.emptySet()));
+        hook("android.bluetooth.le.BluetoothLeScanner", loader, "startScan", true,
+                p -> p.setThrowable(new SecurityException("Nearby scan unavailable by privacy policy")));
+        hook("android.bluetooth.BluetoothManager", loader, "getConnectedDevices", true,
+                p -> p.setResult(Collections.emptyList()));
+        for (String cls : new String[]{"android.bluetooth.BluetoothAdapter", "android.bluetooth.BluetoothDevice"}) {
+            hook(cls, loader, "getName", true, p -> p.setResult(""));
+            hook(cls, loader, "getAddress", true, p -> p.setResult("02:00:00:00:00:00"));
+        }
+        for (String method : new String[]{"getFromLocation", "getFromLocationName"})
+            hook("android.location.Geocoder", loader, method, true, p -> {
+                if (((Method) p.method).getReturnType() != void.class) {
+                    p.setResult(Collections.emptyList()); return;
+                }
+                p.setResult(null);
+                if (Build.VERSION.SDK_INT >= 33)
+                    for (Object arg : p.args) if (arg instanceof android.location.Geocoder.GeocodeListener listener)
+                        listener.onGeocode(Collections.emptyList());
+            });
+        // A network-country broadcast is another entry point independent of TelephonyManager getters.
+        hook("android.content.Intent", loader, "getStringExtra", true, p -> {
+            if (isNetworkCountry((Intent) p.thisObject) && p.args.length > 0
+                    && "android.telephony.extra.NETWORK_COUNTRY".equals(p.args[0]))
+                p.setResult(profile.get("network_country", ""));
+        });
+        hook("android.content.Intent", loader, "getExtras", false, p -> {
+            if (isNetworkCountry((Intent) p.thisObject) && p.getResult() instanceof Bundle extras) {
+                Bundle copy = new Bundle(extras);
+                copy.putString("android.telephony.extra.NETWORK_COUNTRY", profile.get("network_country", ""));
+                p.setResult(copy);
+            }
+        });
+        optionalFusedLocation(loader);
+    }
+
+    private void optionalFusedLocation(ClassLoader loader) {
+        // Current target APK has no unobfuscated FLP entry point. Future compatible clients are
+        // intercepted through the concrete object returned by the factory, never an interface.
+        String factory = "com.google.android.gms.location.LocationServices";
+        if (XposedHelpers.findClassIfExists(factory, loader) == null) return;
+        hook(factory, loader, "getFusedLocationProviderClient", false, p -> {
+            Object client = p.getResult();
+            if (client == null) return;
+            p.setThrowable(new SecurityException("Location client unavailable by privacy policy"));
+            int protectedMethods = 0;
+            for (Class<?> type = client.getClass(); type != null && type != Object.class;
+                    type = type.getSuperclass()) {
+                for (Method method : type.getDeclaredMethods()) {
+                    if (!Set.of("getLastLocation", "getCurrentLocation", "getLocationAvailability",
+                            "requestLocationUpdates", "flushLocations").contains(method.getName())
+                            || java.lang.reflect.Modifier.isAbstract(method.getModifiers())) continue;
+                    String key = "fused:" + type.getName() + "#" + method.getName();
+                    synchronized (reported) {
+                        if (reported.contains(key)) { protectedMethods++; continue; }
+                        Set<XC_MethodHook.Unhook> installed = XposedBridge.hookAllMethods(type, method.getName(), new XC_MethodHook() {
+                            @Override protected void beforeHookedMethod(MethodHookParam call) {
+                                SecurityException denied = new SecurityException("Location unavailable by privacy policy");
+                                call.setThrowable(denied);
+                                try {
+                                    Class<?> tasks = XposedHelpers.findClass("com.google.android.gms.tasks.Tasks", loader);
+                                    Object result = XposedHelpers.callStaticMethod(tasks, "forException", denied);
+                                    if (((Method) call.method).getReturnType().isInstance(result)) call.setResult(result);
+                                } catch (Throwable ignored) {
+                                    // Keep the installed denial; never invoke the real provider.
+                                }
+                            }
+                        });
+                        if (installed.isEmpty()) continue;
+                        hookCount += installed.size();
+                        reported.add(key); protectedMethods++;
+                    }
+                }
+            }
+            if (protectedMethods > 0) p.setResult(client);
+        });
+        String result = "com.google.android.gms.location.LocationResult";
+        if (XposedHelpers.findClassIfExists(result, loader) != null) {
+            hook(result, loader, "getLastLocation", true, p -> p.setResult(null));
+            hook(result, loader, "getLocations", true, p -> p.setResult(Collections.emptyList()));
+        }
+    }
+
+    private static boolean isNetworkCountry(Intent intent) {
+        return "android.telephony.action.NETWORK_COUNTRY_CHANGED".equals(intent.getAction());
     }
 
     private void screen(ClassLoader loader) {

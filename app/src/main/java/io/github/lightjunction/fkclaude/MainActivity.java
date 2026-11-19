@@ -72,11 +72,13 @@ public final class MainActivity extends Activity {
             }
             toast(R.string.edited);
         });
-        button(actions, R.string.preset, v -> { render(Profile.defaults(profile)); toast(R.string.edited); });
+        button(actions, R.string.preset, v -> applyPreset(false));
+        button(actions, R.string.us_privacy_preset, v -> applyPreset(true));
         root.addView(actions);
         root.addView(text(getString(R.string.limits)));
         root.addView(text(getString(R.string.build_note)));
         root.addView(text(getString(R.string.ip_guard_note)));
+        root.addView(text(getString(R.string.us_privacy_note)));
         int group = -1;
         LinearLayout section = null;
         for (Schema.Field field : Schema.FIELDS) {
@@ -173,8 +175,21 @@ public final class MainActivity extends Activity {
         }
         return new Profile(values);
     }
+    private void applyPreset(boolean usOnly) {
+        try {
+            Profile draft = collect();
+            render(usOnly ? Profile.usPrivacy(draft) : Profile.defaults(draft));
+            toast(R.string.edited);
+        } catch (RuntimeException invalid) { toast(R.string.invalid); }
+    }
+
     private void save() {
-        try { ProfileStore.save(this, collect()); toast(R.string.saved); }
+        try {
+            Profile saved = collect();
+            ProfileStore.save(this, saved);
+            render(saved);
+            toast(R.string.saved);
+        }
         catch (RuntimeException e) { toast(R.string.invalid); }
     }
     @Override protected void onSaveInstanceState(Bundle state) {

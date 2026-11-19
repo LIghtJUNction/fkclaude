@@ -96,6 +96,7 @@ public final class Schema {
         new Field(10, "web_vendor", "text", "", R.string.field_web_vendor),
         new Field(10, "web_device_memory", "float", "0", R.string.field_web_device_memory),
         new Field(10, "web_origins", "text", "*", R.string.field_web_origins),
+        new Field(11, "privacy_us_only", "bool", "true", R.string.field_privacy_us_only),
         new Field(11, "ip_guard_enabled", "bool", "true", R.string.field_ip_guard_enabled),
         new Field(11, "ip_guard_cidrs", "text", "", R.string.field_ip_guard_cidrs),
         new Field(11, "ip_guard_probe_url", "text", "https://claude.ai/cdn-cgi/trace", R.string.field_ip_guard_probe_url),

@@ -123,4 +123,7 @@
     <string name="audit_entry_note">在 Claude 内搜索、分类浏览本地脱敏记录。记录开关独立于环境覆盖；升级模块后请重启 Claude。</string>
     <string name="audit_not_installed">尚未安装 Claude。</string>
     <string name="audit_open_error">暂时无法打开 Claude，请检查应用是否已启用。</string>
+    <string name="us_privacy_preset">应用美国隐私配置</string>
+    <string name="field_privacy_us_only">仅美国隐私策略</string>
+    <string name="us_privacy_note">美国隐私配置阻断本机定位，并在 Claude 内使用美国地区设置。联网须同时满足探测报告美国和 IP 白名单；此配置不会设置 VPN，白名单为空时保持离线。修改必需保护前，须先关闭仅美国策略。</string>
 </resources>

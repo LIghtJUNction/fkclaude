@@ -6,10 +6,13 @@ import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -54,8 +57,8 @@ import java.util.concurrent.TimeUnit;
 final class AuditPanel {
     static final String OPEN_EXTRA = "fkclaude.openAudit";
     static final int REQUEST_EXPORT = 0x5F4C;
-    private static final int BG = 0xff141618, SURFACE = 0xff212427;
-    private static final int FG = 0xfff0f2f4, MUTED = 0xffa5adb4, ACCENT = 0xffa9c7ff;
+    private static final int BG = 0xff101113, SURFACE = 0xff1b1d21;
+    private static final int FG = 0xffe9eaee, MUTED = 0xff9ca2ab, ACCENT = 0xffa8c7fa;
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final Map<Activity, WeakReference<AuditPanel>> PANELS = new WeakHashMap<>();
     private static final ThreadPoolExecutor WORKER = new ThreadPoolExecutor(1, 1, 0,
@@ -300,37 +303,50 @@ final class AuditPanel {
         dialog = new Dialog(activity, android.R.style.Theme_Material_Dialog_NoActionBar);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         LinearLayout root = column(activity);
-        root.setPadding(dp(activity, 18), dp(activity, 14), dp(activity, 18), dp(activity, 12));
-        root.setBackground(shape(BG, dp(activity, 24)));
+        root.setPadding(dp(activity, 22), dp(activity, 24), dp(activity, 22), dp(activity, 18));
+        root.setBackground(shape(BG, dp(activity, 28)));
         root.setFocusableInTouchMode(true);
 
         LinearLayout titleRow = row(activity);
         LinearLayout title = column(activity);
-        TextView eyebrow = text(activity, "FKCLAUDE  /  LOCAL AUDIT", 10, MUTED);
-        eyebrow.setLetterSpacing(0.12f);
+        TextView eyebrow = text(activity, "FKCLAUDE", 10, MUTED);
+        eyebrow.setLetterSpacing(0.18f);
         title.addView(eyebrow);
-        title.addView(text(activity, "行为审计", 25, FG));
+        TextView heading = text(activity, "行为审计", 27, FG);
+        heading.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        heading.setPadding(0, dp(activity, 5), 0, 0);
+        title.addView(heading);
         titleRow.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         Button close = button(activity, "收起", v -> dialog.dismiss());
         close.setContentDescription("关闭弹窗，保留记录状态");
-        titleRow.addView(close);
-        root.addView(titleRow);
+        titleRow.addView(close, new LinearLayout.LayoutParams(dp(activity, 56), dp(activity, 48)));
+        LinearLayout.LayoutParams titleLayout = new LinearLayout.LayoutParams(-1, -2);
+        titleLayout.bottomMargin = dp(activity, 12);
+        root.addView(titleRow, titleLayout);
 
         ScrollView controlsScroll = new ScrollView(activity);
         controlsScroll.setFillViewport(false);
         controlsScroll.setVerticalScrollBarEnabled(false);
+        controlsScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         LinearLayout controls = column(activity);
+        controls.setPadding(0, 0, 0, dp(activity, 12));
         controlsScroll.addView(controls);
         root.addView(controlsScroll, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout recordRow = row(activity);
-        status = text(activity, "正在读取本地记录…", 11, MUTED);
-        status.setMaxLines(3);
+        status = text(activity, "正在读取本地记录…", 12, FG);
+        status.setMaxLines(2);
+        status.setLineSpacing(dp(activity, 5), 1f);
+        status.setGravity(Gravity.CENTER_VERTICAL);
+        status.setPadding(0, dp(activity, 4), dp(activity, 12), dp(activity, 4));
+        status.setMinimumHeight(dp(activity, 52));
+        status.setContentDescription("查看审计状态详情");
+        status.setBackground(ripple(activity, 10));
+        status.setOnClickListener(v -> showStatusDetails());
         recordRow.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
         recording = new Switch(activity);
-        recording.setText("记录");
-        recording.setTextSize(13);
-        recording.setTextColor(FG);
+        styleSwitch(activity, recording);
+        recording.setText("");
         recording.setContentDescription("开启或关闭事件记录");
         recording.setChecked(AuditLog.isEnabled());
         recording.setOnCheckedChangeListener((view, checked) -> {
@@ -339,7 +355,7 @@ final class AuditPanel {
             updateRecordState();
             refresh(true);
         });
-        recordRow.addView(recording);
+        recordRow.addView(recording, new LinearLayout.LayoutParams(-2, dp(activity, 52)));
         controls.addView(recordRow);
 
         search = new EditText(activity);
@@ -351,35 +367,49 @@ final class AuditPanel {
         search.setContentDescription("搜索审计事件");
         search.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                 | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        search.setPadding(dp(activity, 14), dp(activity, 9), dp(activity, 14), dp(activity, 9));
-        search.setBackground(shape(SURFACE, dp(activity, 12)));
-        LinearLayout.LayoutParams searchLayout = new LinearLayout.LayoutParams(-1, dp(activity, 44));
-        searchLayout.topMargin = dp(activity, 8);
+        search.setPadding(dp(activity, 16), 0, dp(activity, 16), 0);
+        search.setBackground(shape(SURFACE, dp(activity, 14)));
+        LinearLayout.LayoutParams searchLayout = new LinearLayout.LayoutParams(-1, dp(activity, 48));
+        searchLayout.topMargin = dp(activity, 12);
         controls.addView(search, searchLayout);
 
+        LinearLayout filters = row(activity);
         category = new Spinner(activity);
+        category.setBackgroundColor(Color.TRANSPARENT);
         ArrayAdapter<String> categories = new ArrayAdapter<>(activity,
                 android.R.layout.simple_spinner_dropdown_item, LABELS) {
             @Override public View getView(int position, View convertView, ViewGroup parent) {
                 TextView view = (TextView) super.getView(position, convertView, parent);
-                view.setTextColor(FG); view.setTextSize(13); return view;
+                view.setText(android.text.TextUtils.concat(LABELS[position], "  ▾"));
+                view.setTextColor(FG); view.setTextSize(12);
+                view.setSingleLine(true);
+                view.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                view.setPadding(0, dp(activity, 10), dp(activity, 8), dp(activity, 10));
+                return view;
             }
             @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
                 TextView view = (TextView) super.getDropDownView(position, convertView, parent);
                 view.setTextColor(FG); view.setBackgroundColor(SURFACE); view.setTextSize(14);
-                view.setPadding(dp(activity, 12), dp(activity, 12), dp(activity, 12), dp(activity, 12));
+                view.setMinHeight(dp(activity, 48));
+                view.setPadding(dp(activity, 16), dp(activity, 12), dp(activity, 16), dp(activity, 12));
                 return view;
             }
         };
         category.setAdapter(categories);
         category.setContentDescription("按事件类别筛选");
-        controls.addView(category, new LinearLayout.LayoutParams(-1, dp(activity, 42)));
+        filters.addView(category, new LinearLayout.LayoutParams(0, dp(activity, 52), 1));
         onlyNonConversation = new Switch(activity);
-        onlyNonConversation.setText("仅非对话网络");
-        onlyNonConversation.setTextSize(13);
-        onlyNonConversation.setTextColor(FG);
+        styleSwitch(activity, onlyNonConversation);
+        onlyNonConversation.setText("非对话网络");
+        onlyNonConversation.setTextSize(12);
+        onlyNonConversation.setTextColor(MUTED);
+        onlyNonConversation.setSwitchPadding(dp(activity, 8));
+        onlyNonConversation.setSingleLine(true);
         onlyNonConversation.setContentDescription("仅显示非对话网络事件，包含未知用途");
-        controls.addView(onlyNonConversation);
+        filters.addView(onlyNonConversation, new LinearLayout.LayoutParams(-2, dp(activity, 52)));
+        LinearLayout.LayoutParams filtersLayout = new LinearLayout.LayoutParams(-1, -2);
+        filtersLayout.topMargin = dp(activity, 4);
+        controls.addView(filters, filtersLayout);
 
         LinearLayout actions = row(activity);
         pause = button(activity, "暂停刷新", v -> {
@@ -391,19 +421,22 @@ final class AuditPanel {
             if (!paused) refresh(true);
         });
         pause.setContentDescription("暂停或继续列表刷新，记录开关独立");
-        actions.addView(pause, new LinearLayout.LayoutParams(0, dp(activity, 44), 1));
+        actions.addView(pause, new LinearLayout.LayoutParams(0, dp(activity, 48), 1));
         actions.addView(button(activity, "导出", v -> chooseExport()),
-                new LinearLayout.LayoutParams(0, dp(activity, 44), 1));
-        actions.addView(button(activity, "清空", v -> confirmClear()),
-                new LinearLayout.LayoutParams(0, dp(activity, 44), 1));
+                new LinearLayout.LayoutParams(0, dp(activity, 48), 1));
+        Button clear = button(activity, "清空", v -> confirmClear());
+        clear.setTextColor(MUTED);
+        actions.addView(clear, new LinearLayout.LayoutParams(0, dp(activity, 48), 1));
         controls.addView(actions);
 
         FrameLayout events = new FrameLayout(activity);
         list = new ListView(activity);
-        list.setDivider(null);
-        list.setDividerHeight(dp(activity, 6));
+        list.setDivider(new ColorDrawable(0xff24262b));
+        list.setDividerHeight(dp(activity, 1));
+        list.setSelector(new ColorDrawable(0x14ffffff));
+        list.setVerticalScrollBarEnabled(false);
         list.setClipToPadding(false);
-        list.setPadding(0, dp(activity, 4), 0, dp(activity, 8));
+        list.setPadding(0, 0, 0, dp(activity, 8));
         list.setContentDescription("审计事件列表，最新在前，点击查看完整记录");
         adapter = new EventAdapter(activity);
         list.setAdapter(adapter);
@@ -411,12 +444,13 @@ final class AuditPanel {
         events.addView(list, new FrameLayout.LayoutParams(-1, -1));
         empty = text(activity, "尚无匹配事件\n使用 Claude 后在此查看；可调整筛选条件。", 14, MUTED);
         empty.setGravity(Gravity.CENTER);
+        empty.setLineSpacing(dp(activity, 8), 1f);
         empty.setPadding(dp(activity, 14), dp(activity, 16), dp(activity, 14), dp(activity, 16));
         events.addView(empty, new FrameLayout.LayoutParams(-1, -1));
         list.setEmptyView(empty);
         root.addView(events, new LinearLayout.LayoutParams(-1, 0, 1));
-        TextView footnote = text(activity, "本地脱敏记录 · 尝试、响应、阻断分别记录", 10, MUTED);
-        footnote.setPadding(0, dp(activity, 8), 0, 0);
+        TextView footnote = text(activity, "本地脱敏记录  ·  点击事件查看详情", 10, MUTED);
+        footnote.setPadding(0, dp(activity, 12), 0, 0);
         root.addView(footnote);
 
         category.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
@@ -451,17 +485,25 @@ final class AuditPanel {
             android.graphics.Rect bounds = activity.getWindowManager().getCurrentWindowMetrics().getBounds();
             Insets safe = activity.getWindowManager().getCurrentWindowMetrics().getWindowInsets()
                     .getInsetsIgnoringVisibility(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-            int height = Math.max(dp(activity, 240), bounds.height() - safe.top - safe.bottom - dp(activity, 32));
+            int height = Math.max(dp(activity, 160), bounds.height() - safe.top - safe.bottom - dp(activity, 32));
             window.setLayout(Math.min(bounds.width() - dp(activity, 24), dp(activity, 620)), height);
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
             WindowManager.LayoutParams params = window.getAttributes();
-            params.dimAmount = 0.55f;
+            params.dimAmount = 0.65f;
             window.setAttributes(params);
         }
         root.addOnLayoutChangeListener((v, l, t, r, b, oldL, oldT, oldR, oldB) -> {
-            int max = Math.min(dp(activity, 260), Math.max(dp(activity, 80), (b - t) / 2));
+            int width = controlsScroll.getWidth();
+            if (width <= 0) return;
+            // Use the content height; cap only when a small window needs scrolling.
+            controls.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            int inner = b - t - root.getPaddingTop() - root.getPaddingBottom();
+            int chrome = titleRow.getMeasuredHeight() + titleLayout.bottomMargin + footnote.getMeasuredHeight();
+            int maximum = Math.max(dp(activity, 48), (inner - chrome) / 2);
+            int height = Math.min(controls.getMeasuredHeight(), maximum);
             ViewGroup.LayoutParams params = controlsScroll.getLayoutParams();
-            if (params.height != max) { params.height = max; controlsScroll.setLayoutParams(params); }
+            if (params.height != height) { params.height = height; controlsScroll.setLayoutParams(params); }
         });
         bubble.setVisibility(View.INVISIBLE);
         root.requestFocus();
@@ -478,23 +520,66 @@ final class AuditPanel {
     private void updateRecordState() {
         if (status == null || recording == null) return;
         updatingToggle = true;
-        recording.setChecked(AuditLog.isEnabled());
+        boolean enabled = AuditLog.isEnabled();
+        recording.setChecked(enabled);
         updatingToggle = false;
-        status.setText((AuditLog.isEnabled() ? "记录中" : "已停止记录")
-                + (paused ? " · 列表已暂停" : " · 实时刷新") + "\n" + summaryLabel(AuditLog.summary()));
-        bubble.setText(AuditLog.isEnabled() ? "审计" : "审计 · 停");
+        String raw = AuditLog.summary();
+        String count = "…";
+        boolean warning = false, loading = false;
+        for (String part : raw.split(" \\| ")) {
+            if (part.endsWith(" retained")) {
+                int slash = part.indexOf('/');
+                if (slash > 0) count = part.substring(0, slash);
+            } else if (part.startsWith("queue dropped ") || part.startsWith("disk errors ")
+                    || part.startsWith("invalid history ")) {
+                warning |= !part.endsWith(" 0");
+            } else if (part.equals("loading history")) loading = true;
+            else if (!part.equals("Recording") && !part.equals("Paused")
+                    && !part.startsWith("PID ") && !part.startsWith("evicted ")) warning = true;
+        }
+        String state = enabled ? "正在记录" : "记录已关闭";
+        String detail = warning ? "有异常 · 点击查看" : loading ? "正在载入历史"
+                : paused ? "列表已暂停 · 查看状态" : "实时刷新 · 查看状态";
+        status.setText(state + "  ·  " + count + " 条\n" + detail);
+        status.setTextColor(warning ? 0xffe9bd80 : FG);
+        bubble.setText(enabled ? "审计" : "审计 · 停");
     }
 
     private static String summaryLabel(String raw) {
-        return raw.replaceFirst("^(Recording|Paused) \\| ", "")
-                .replace("PID ", "进程 ")
-                .replaceAll("([0-9]+/[0-9]+) retained", "保留 $1")
-                .replace("evicted ", "淘汰 ")
-                .replace("queue dropped ", "队列丢弃 ")
-                .replace("disk errors ", "磁盘错误 ")
-                .replace("invalid history ", "无效历史 ")
-                .replace("loading history", "正在载入历史")
-                .replace(" | ", " · ");
+        ArrayList<String> lines = new ArrayList<>();
+        for (String part : raw.split(" \\| ")) {
+            if (part.equals("Recording")) lines.add("事件记录：开启");
+            else if (part.equals("Paused")) lines.add("事件记录：关闭");
+            else if (part.startsWith("PID ")) lines.add("当前进程：" + part.substring(4));
+            else if (part.endsWith(" retained")) lines.add("保留记录：" + part.substring(0, part.length() - 9));
+            else if (part.startsWith("evicted ")) lines.add("窗口淘汰：" + part.substring(8));
+            else if (part.startsWith("queue dropped ")) lines.add("队列丢弃：" + part.substring(14));
+            else if (part.startsWith("disk errors ")) lines.add("磁盘错误：" + part.substring(12));
+            else if (part.startsWith("invalid history ")) lines.add("无效历史：" + part.substring(16));
+            else if (part.equals("loading history")) lines.add("历史状态：载入中");
+            else lines.add("最近错误：" + part);
+        }
+        return String.join("\n", lines);
+    }
+
+    private void showStatusDetails() {
+        Activity activity = owner.get();
+        if (activity == null || disposed || activity.isFinishing() || activity.isDestroyed()) return;
+        TextView details = text(activity, summaryLabel(AuditLog.summary())
+                + "\n列表刷新：" + (paused ? "暂停" : "实时")
+                + "\n\n记录与列表刷新分别控制。窗口淘汰表示已达到本地保留上限；队列丢弃或磁盘错误可能造成记录缺口。"
+                + "\n\n网络事件按尝试、返回和响应分别记录。本机套接字接纳的字节数不代表对端已确认接收。",
+                13, FG);
+        details.setPadding(dp(activity, 22), dp(activity, 12), dp(activity, 22), dp(activity, 18));
+        details.setLineSpacing(dp(activity, 6), 1f);
+        details.setTextIsSelectable(true);
+        ScrollView scroll = new ScrollView(activity);
+        scroll.setBackgroundColor(BG);
+        scroll.addView(details);
+        if (detailDialog != null) detailDialog.dismiss();
+        detailDialog = new AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("审计状态").setView(scroll).setPositiveButton("完成", null).create();
+        detailDialog.show();
     }
 
     private void refresh(boolean force) {
@@ -556,6 +641,7 @@ final class AuditPanel {
         ScrollView scroll = new ScrollView(activity);
         scroll.setBackgroundColor(BG);
         scroll.addView(detail);
+        if (detailDialog != null) detailDialog.dismiss();
         detailDialog = new AlertDialog.Builder(activity, android.R.style.Theme_Material_Dialog_Alert)
                 .setTitle("事件详情").setView(scroll).setPositiveButton("完成", null).create();
         detailDialog.show();
@@ -647,8 +733,8 @@ final class AuditPanel {
             return switch (outcome) {
                 case "called" -> "调用开始";
                 case "attempted" -> "尝试发送";
-                case "returned" -> "bytes_accepted_by_socket".equals(fields.optString("observation"))
-                        ? "本机套接字已返回" : "接口已返回";
+                case "returned" -> fields.optString("observation").endsWith("bytes_accepted_by_socket")
+                        ? "本机已接纳" : "接口已返回";
                 case "response_received" -> "收到响应";
                 case "blocked" -> "已阻断";
                 case "failed" -> "NameNotFoundException".equals(fields.optString("error_type")) ? "查询未命中" : "调用失败";
@@ -692,6 +778,11 @@ final class AuditPanel {
                 String transport = fields.optString("transport", "").toUpperCase(Locale.ROOT);
                 String prefix = "原生" + (transport.isEmpty() || transport.equals("UNKNOWN") ? "" : " " + transport);
                 return switch (operation) {
+                    case "observer_installed" -> "原生网络审计已就绪";
+                    case "observer_unavailable" -> "原生网络审计不可用";
+                    case "observer_control_failed" -> "原生记录控制异常";
+                    case "observer_error" -> "原生网络审计异常";
+                    case "queue_dropped" -> "原生事件队列丢弃";
                     case "connect" -> prefix + " 连接调用";
                     case "send", "sendto", "sendmsg", "sendmmsg" -> prefix + " 发送（" + operation + "）";
                     case "write", "writev" -> prefix + " 套接字写入（" + operation + "）";
@@ -699,6 +790,10 @@ final class AuditPanel {
                 };
             }
             return switch (action) {
+                case "audit_started" -> "本地审计已启动";
+                case "audit_cleared" -> "本地审计记录已清空";
+                case "recording_changed" -> "true".equals(fields.optString("enabled"))
+                        ? "事件记录已开启" : "事件记录已关闭";
                 case "api_access" -> apiLabel(kind, source);
                 case "identifier_read" -> "访问 Android ID 接口";
                 case "system_property_read" -> "查询系统属性";
@@ -824,8 +919,8 @@ final class AuditPanel {
             if (!error.isEmpty()) metrics.add(error);
             String bytes = fields.optString("bytes", "");
             if (!bytes.isEmpty()) {
-                if ("bytes_accepted_by_socket".equals(fields.optString("observation")))
-                    metrics.add("本机套接字接纳 " + bytes + " B");
+                if (fields.optString("observation").endsWith("bytes_accepted_by_socket"))
+                    metrics.add("本机接纳 " + bytes + " B");
                 else if (action.equals("datagram_send") || action.startsWith("web_"))
                     metrics.add("请求体大小 " + bytes + " B");
             }
@@ -834,20 +929,7 @@ final class AuditPanel {
             String errno = fields.optString("errno", "");
             if (!errno.isEmpty() && !"0".equals(errno)) metrics.add("errno=" + errno);
             if (!metrics.isEmpty()) lines.add(String.join(" · ", metrics));
-            if ("bytes_accepted_by_socket".equals(fields.optString("observation")))
-                lines.add("对端接收状态未知");
-            else if (http(action)) {
-                String transport = fields.optString("transport", "");
-                if (!transport.isEmpty()) lines.add(switch (transport) {
-                    case "fetch" -> "网页 fetch";
-                    case "xhr" -> "网页 XMLHttpRequest";
-                    case "beacon" -> "网页 Beacon";
-                    case "websocket" -> "WebSocket";
-                    case "okhttp" -> "应用 HTTP 客户端";
-                    case "urlconnection" -> "系统 HTTP 客户端";
-                    default -> transport;
-                });
-            } else if (action.equals("api_access")) {
+            if (action.equals("api_access")) {
                 String api = fields.optString("api", source);
                 int hash = api.lastIndexOf('#');
                 if (hash > 0) {
@@ -855,7 +937,7 @@ final class AuditPanel {
                     int dot = owner.lastIndexOf('.');
                     lines.add(owner.substring(dot + 1) + api.substring(hash));
                 } else if (!api.isEmpty()) lines.add(api);
-            } else {
+            } else if (!http(action) && !action.startsWith("native_")) {
                 String field = fields.optString("field", "");
                 if (!field.isEmpty()) lines.add("接口 / 字段：" + field);
                 String operation = fields.optString("operation", "");
@@ -883,22 +965,33 @@ final class AuditPanel {
         @Override public long getItemId(int position) { return position; }
         @Override public View getView(int position, View convertView, ViewGroup parent) {
             LinearLayout row;
-            TextView meta, title, subtitle;
+            TextView title, subtitle, meta;
             if (convertView instanceof LinearLayout reuse) {
-                row = reuse; meta = (TextView) row.getChildAt(0);
-                title = (TextView) row.getChildAt(1); subtitle = (TextView) row.getChildAt(2);
+                row = reuse;
+                title = (TextView) row.getChildAt(0);
+                subtitle = (TextView) row.getChildAt(1);
+                meta = (TextView) row.getChildAt(2);
             } else {
                 row = column(context);
-                row.setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10));
-                row.setBackground(shape(SURFACE, dp(context, 12)));
-                meta = text(context, "", 10, ACCENT); meta.setMaxLines(2);
-                title = text(context, "", 14, FG); title.setTypeface(Typeface.DEFAULT, Typeface.BOLD); title.setMaxLines(2);
-                subtitle = text(context, "", 11, MUTED); subtitle.setMaxLines(3);
+                row.setPadding(0, dp(context, 18), 0, dp(context, 18));
+                title = text(context, "", 15, FG);
+                title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+                title.setMaxLines(2);
+                title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                title.setLineSpacing(dp(context, 2), 1f);
+                subtitle = text(context, "", 12, MUTED);
+                subtitle.setMaxLines(3);
                 subtitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                row.addView(meta); row.addView(title); row.addView(subtitle);
+                subtitle.setLineSpacing(dp(context, 3), 1f);
+                subtitle.setPadding(0, dp(context, 6), 0, 0);
+                meta = text(context, "", 10, MUTED);
+                meta.setSingleLine(true);
+                meta.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                meta.setPadding(0, dp(context, 10), 0, 0);
+                row.addView(title); row.addView(subtitle); row.addView(meta);
             }
             Event event = items.get(position);
-            meta.setText(event.meta); title.setText(event.title); subtitle.setText(event.subtitle);
+            title.setText(event.title); subtitle.setText(event.subtitle); meta.setText(event.meta);
             subtitle.setVisibility(event.subtitle.isEmpty() ? View.GONE : View.VISIBLE);
             return row;
         }
@@ -919,10 +1012,22 @@ final class AuditPanel {
         Button button = new Button(context);
         button.setText(label); button.setTextSize(12); button.setTextColor(ACCENT);
         button.setAllCaps(false); button.setMinWidth(0); button.setMinimumWidth(0);
-        button.setMinHeight(dp(context, 44)); button.setMinimumHeight(dp(context, 44));
+        button.setMinHeight(dp(context, 48)); button.setMinimumHeight(dp(context, 48));
         button.setPadding(dp(context, 8), 0, dp(context, 8), 0);
-        button.setBackgroundResource(android.R.color.transparent);
+        button.setBackground(ripple(context, 12));
         button.setOnClickListener(click); return button;
+    }
+    private static RippleDrawable ripple(Context context, int radius) {
+        return new RippleDrawable(ColorStateList.valueOf(0x1fa8c7fa), null,
+                shape(Color.WHITE, dp(context, radius)));
+    }
+    private static void styleSwitch(Context context, Switch view) {
+        int[][] states = {{android.R.attr.state_checked}, {}};
+        view.setThumbTintList(new ColorStateList(states, new int[]{ACCENT, 0xffb3b7bf}));
+        view.setTrackTintList(new ColorStateList(states, new int[]{0xff3e5474, 0xff3b3e45}));
+        view.setMinimumHeight(dp(context, 48));
+        view.setMinWidth(dp(context, 48));
+        view.setPadding(dp(context, 4), 0, 0, 0);
     }
     private static GradientDrawable shape(int color, int radius) {
         GradientDrawable background = new GradientDrawable(); background.setColor(color);

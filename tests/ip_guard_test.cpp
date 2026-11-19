@@ -6,6 +6,12 @@
 #include <cassert>
 #include <cerrno>
 #include <cstring>
+#include <algorithm>
+#include <cstdio>
+#include <fcntl.h>
+#include <vector>
+#include <sys/uio.h>
+#include <sys/sendfile.h>
 #include <dlfcn.h>
 #include <iostream>
 #include <map>
@@ -20,15 +26,21 @@
 using namespace fkclaude::ip_guard;
 namespace {
 std::map<std::string, void*> wrappers;
-std::map<void*, std::string> names;
+std::map<void*, std::vector<std::string>> names;
+std::map<void*, unsigned> hook_calls;
 std::string missing, failure;
 void* resolver(const char* name) {
     if (missing == name) return nullptr;
-    void* p = dlsym(RTLD_DEFAULT, name); assert(p); names[p] = name; return p;
+    void* p = dlsym(RTLD_DEFAULT, name); assert(p);
+    auto& aliases = names[p];
+    if (std::find(aliases.begin(), aliases.end(), name) == aliases.end()) aliases.emplace_back(name);
+    return p;
 }
 int hook(void* target, void* replacement, void** original) {
-    if (names.at(target) == failure) return -1;
-    *original = target; wrappers[names.at(target)] = replacement;
+    for (const auto& name : names.at(target)) if (name == failure) return -1;
+    *original = target;
+    for (const auto& name : names.at(target)) wrappers[name] = replacement;
+    ++hook_calls[target];
     // Hook engines may invoke an already patched libc entry while installing another.
     if (wrappers.count("getaddrinfo")) {
         using Resolver = int (*)(const char*,const char*,const addrinfo*,addrinfo**);
@@ -44,6 +56,11 @@ using ST = ssize_t (*)(int,const void*,size_t,int,const sockaddr*,socklen_t);
 using SM = ssize_t (*)(int,const msghdr*,int);
 using SMM = int (*)(int,mmsghdr*,unsigned,int);
 using G = int (*)(const char*,const char*,const addrinfo*,addrinfo**);
+using W = ssize_t (*)(int,const void*,size_t);
+using WV = ssize_t (*)(int,const iovec*,int);
+using SF = ssize_t (*)(int,int,off_t*,size_t);
+using SF64 = ssize_t (*)(int,int,off64_t*,size_t);
+using SP = ssize_t (*)(int,off64_t*,int,off64_t*,size_t,unsigned);
 sockaddr_in address4() { sockaddr_in a{}; a.sin_family=AF_INET; a.sin_addr.s_addr=htonl(INADDR_LOOPBACK); a.sin_port=htons(9); return a; }
 struct Pair {
     int client, peer;
@@ -65,6 +82,130 @@ struct Pair {
 void denied(int fd) {
     errno=0; assert(wrap<S>("send")(fd,"x",1,MSG_NOSIGNAL)==-1 && errno==EACCES);
 }
+void outputs_denied(int fd) {
+    iovec vectors[]{ {const_cast<char*>("a"),1}, {const_cast<char*>("b"),1} };
+    assert(wrap<W>("write")(fd,"x",1)==-1 && errno==EACCES);
+    assert(wrap<WV>("writev")(fd,vectors,2)==-1 && errno==EACCES);
+    off_t offset=0; off64_t offset64=0;
+    assert(wrap<SF>("sendfile")(fd,-1,&offset,1)==-1 && errno==EACCES);
+    assert(wrap<SF64>("sendfile64")(fd,-1,&offset64,1)==-1 && errno==EACCES);
+    assert(wrap<SP>("splice")(-1,nullptr,fd,nullptr,1,0)==-1 && errno==EACCES);
+}
+void received(int fd, const char* expected, size_t count) {
+    char buffer[8]{};
+    assert(read(fd,buffer,count)==static_cast<ssize_t>(count));
+    assert(std::memcmp(buffer,expected,count)==0);
+}
+void outputs_allowed(int fd, int reader) {
+    iovec vectors[]{ {const_cast<char*>("a"),1}, {const_cast<char*>("b"),1} };
+    assert(wrap<W>("write")(fd,"x",1)==1); received(reader,"x",1);
+    assert(wrap<WV>("writev")(fd,vectors,2)==2); received(reader,"ab",2);
+    FILE* source=std::tmpfile(); assert(source);
+    assert(write(fileno(source),"x",1)==1);
+    off_t offset=0;
+    assert(wrap<SF>("sendfile")(fd,fileno(source),&offset,1)==1); received(reader,"x",1);
+    off64_t offset64=0;
+    assert(wrap<SF64>("sendfile64")(fd,fileno(source),&offset64,1)==1); received(reader,"x",1);
+    std::fclose(source);
+    int pipefd[2]; assert(pipe(pipefd)==0); assert(write(pipefd[1],"x",1)==1);
+    assert(wrap<SP>("splice")(pipefd[0],nullptr,fd,nullptr,1,0)==1); received(reader,"x",1);
+    close(pipefd[0]);close(pipefd[1]);
+}
+struct DatagramPair {
+    int client, peer;
+    explicit DatagramPair(int family, bool mapped=false) {
+        int peer_family=mapped ? AF_INET : family;
+        peer=socket(peer_family,SOCK_DGRAM,0);assert(peer>=0);
+        sockaddr_storage storage{};
+        socklen_t length;
+        if(peer_family==AF_INET) {
+            auto& a=*reinterpret_cast<sockaddr_in*>(&storage);
+            a=address4();a.sin_port=0;length=sizeof(a);
+        } else {
+            auto& a=*reinterpret_cast<sockaddr_in6*>(&storage);
+            a.sin6_family=AF_INET6;a.sin6_addr=in6addr_loopback;length=sizeof(a);
+        }
+        assert(bind(peer,reinterpret_cast<sockaddr*>(&storage),length)==0);
+        assert(getsockname(peer,reinterpret_cast<sockaddr*>(&storage),&length)==0);
+        client=socket(family,SOCK_DGRAM,0);assert(client>=0);
+        if(mapped) {
+            auto port=reinterpret_cast<sockaddr_in*>(&storage)->sin_port;
+            storage={};
+            auto& a=*reinterpret_cast<sockaddr_in6*>(&storage);
+            a.sin6_family=AF_INET6;a.sin6_port=port;
+            assert(inet_pton(AF_INET6,"::ffff:127.0.0.1",&a.sin6_addr)==1);
+            length=sizeof(a);
+            int disabled=0;assert(setsockopt(client,IPPROTO_IPV6,IPV6_V6ONLY,&disabled,sizeof(disabled))==0);
+        }
+        // The host fixture intentionally uses libc directly; only its tested
+        // writes use captured gates. This leaves real live sockets while denied.
+        assert(connect(client,reinterpret_cast<sockaddr*>(&storage),length)==0);
+    }
+    ~DatagramPair(){close(client);close(peer);}
+    void allowed() {
+        assert(wrap<W>("write")(client,"x",1)==1);received(peer,"x",1);
+        iovec vectors[]{ {const_cast<char*>("a"),1}, {const_cast<char*>("b"),1} };
+        assert(wrap<WV>("writev")(client,vectors,2)==2);received(peer,"ab",2);
+    }
+};
+void test_generic_families() {
+    deny_without_revoke_for_test();
+    DatagramPair v4(AF_INET),v6(AF_INET6),mapped(AF_INET6,true);
+    permit(4,10000);v4.allowed();mapped.allowed();outputs_denied(v6.client);
+    deny_without_revoke_for_test();
+    permit(6,10000);v6.allowed();outputs_denied(v4.client);outputs_denied(mapped.client);
+}
+void test_generic_writes() {
+    // A live TCP connection with a closed gate but no shutdown proves rejection
+    // comes from each wrapper, not EPIPE from an already dead fixture.
+    permit(4,10000);
+    {
+        Pair p;
+        outputs_allowed(p.client,p.peer);
+        deny_without_revoke_for_test();
+        assert(send(p.client,"c",1,MSG_NOSIGNAL)==1); received(p.peer,"c",1);
+        outputs_denied(p.client);
+        char b; assert(recv(p.peer,&b,1,MSG_DONTWAIT)==-1 && (errno==EAGAIN || errno==EWOULDBLOCK));
+    }
+    // Local IPC and regular files retain their normal I/O behavior while blocked.
+    block();
+    int unixfd[2]; assert(socketpair(AF_UNIX,SOCK_STREAM,0,unixfd)==0);
+    outputs_allowed(unixfd[0],unixfd[1]);close(unixfd[0]);close(unixfd[1]);
+    int pipefd[2];assert(pipe(pipefd)==0);
+    outputs_allowed(pipefd[1],pipefd[0]);close(pipefd[0]);close(pipefd[1]);
+    FILE* file=std::tmpfile();assert(file);
+    iovec vectors[]{ {const_cast<char*>("a"),1}, {const_cast<char*>("b"),1} };
+    assert(wrap<W>("write")(fileno(file),"x",1)==1);
+    assert(wrap<WV>("writev")(fileno(file),vectors,2)==2);
+    assert(lseek(fileno(file),0,SEEK_SET)==0);received(fileno(file),"xab",3);
+    std::fclose(file);
+    assert(wrap<W>("write")(-1,"x",1)==-1 && errno==EBADF);
+    assert(wrap<WV>("writev")(-1,vectors,2)==-1 && errno==EBADF);
+    // Registration is per thread and descriptor identity, not a process-wide pass.
+    probe(true);
+    {
+        Pair p(true);
+        block();
+        outputs_allowed(p.client,p.peer);
+        std::thread outsider([&]{outputs_denied(p.client);});outsider.join();
+        int alias=dup(p.client);assert(alias>=0);outputs_denied(alias);denied(alias);close(alias);
+        int old=p.client;close(p.client);p.client=-1;
+        permit(4,10000);
+        std::thread replace([&]{
+            Pair q;
+            assert(dup2(q.client,old)==old);
+            // q's peer may be old if the kernel reused it. Do not let its RAII
+            // cleanup close the copied client descriptor until main checks it.
+            if(q.peer==old)q.peer=-1;
+            if(q.client==old)q.client=-1;
+        });
+        replace.join();
+        deny_without_revoke_for_test();outputs_denied(old);denied(old);close(old);
+        probe(false);
+        outputs_denied(p.peer);
+    }
+    std::cout<<"generic write gates passed (write/writev/sendfile/sendfile64/splice)\n";
+}
 }
 int main() {
     std::cout << "HOST FAKE INLINE HOOK: captures wrappers; does not patch libc\n";
@@ -79,7 +220,9 @@ int main() {
     }
     int status; assert(waitpid(child, &status, 0) == child);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 137);
-    missing="sendmmsg"; assert(!start()); assert(wrappers.empty());
+    for (const auto* symbol : {"sendmmsg","write","writev","sendfile","sendfile64","splice"}) {
+        missing=symbol; assert(!start()); assert(wrappers.empty());
+    }
     missing.clear(); failure="sendmsg"; assert(!start());
     int fd=socket(AF_INET,SOCK_DGRAM,0); assert(fd>=0); denied(fd);
     failure.clear(); assert(start()); assert(start());
@@ -136,6 +279,9 @@ int main() {
     assert(wrap<G>("getaddrinfo")("127.0.0.1",nullptr,&hints,&out)==0); freeaddrinfo(out); probe(false);
     permit(4,-1); denied(fd); permit(99,10000); denied(fd);
     close(fd);close(v6);
+    test_generic_writes();
+    test_generic_families();
+    assert(hook_calls.at(dlsym(RTLD_DEFAULT,"sendfile"))==1);
     stop_for_test();
     // Off before start / after host stop preserves libc behavior.
     fd=socket(AF_INET,SOCK_DGRAM,0);

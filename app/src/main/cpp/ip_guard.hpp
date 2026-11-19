@@ -13,5 +13,6 @@ void probe(bool enter);
 // Fake hooks in host tests capture wrappers; they do not patch libc.
 void set_resolver_for_test(void* (*resolver)(const char*));
 void stop_for_test();
+void deny_without_revoke_for_test();
 #endif
 }

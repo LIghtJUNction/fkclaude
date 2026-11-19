@@ -17,6 +17,8 @@
 #include <netdb.h>
 #include <set>
 #include <sys/socket.h>
+#include <sys/sendfile.h>
+#include <sys/uio.h>
 #include <sys/stat.h>
 #include <thread>
 #include <tuple>
@@ -91,11 +93,17 @@ int socket_family(int fd) {
         return address_family(reinterpret_cast<sockaddr*>(&a), n);
     return 0; // Preserve libc's EBADF/ENOTSOCK handling.
 }
-bool allowed_locked(State& s, int family) {
-    return !s.active || !family || local_probe.depth ||
-        s.leases[family == 4 ? 0 : 1] > now();
+bool registered_probe(int fd, const struct stat& st) {
+    if (!local_probe.depth) return false;
+    const Identity current{fd, st.st_dev, st.st_ino};
+    for (const auto& registered : local_probe.identities)
+        if (registered == current) return true;
+    return false;
 }
-bool allow(int fd, const sockaddr* a = nullptr, socklen_t n = 0) {
+bool allowed_locked(State& s, int family) {
+    return !s.active || !family || s.leases[family == 4 ? 0 : 1] > now();
+}
+bool allow(int fd, const sockaddr* a = nullptr, socklen_t n = 0, bool probe_connect = false) {
     int saved = errno;
     int family = address_family(a, n);
     if (!family) family = socket_family(fd);
@@ -103,6 +111,39 @@ bool allow(int fd, const sockaddr* a = nullptr, socklen_t n = 0) {
     auto& s = state();
     std::lock_guard<std::mutex> lock(s.mutex);
     bool ok = allowed_locked(s, family);
+    if (!ok && local_probe.depth) {
+        struct stat st{};
+        if (fstat(fd, &st) == 0 && S_ISSOCK(st.st_mode))
+            ok = probe_connect || registered_probe(fd, st);
+    }
+    errno = ok ? saved : EACCES;
+    return ok;
+}
+// Generic writes can carry Internet traffic too. Non-socket/Unix paths never
+// take the guard mutex or log: libc may write during installation/revocation.
+bool allow_output(int fd) {
+    int saved = errno;
+    struct stat st{};
+    if (fstat(fd, &st) != 0) {
+        if (errno == EBADF) { errno = saved; return true; }
+        errno = EACCES; return false; // Unknown output must not silently bypass.
+    }
+    if (!S_ISSOCK(st.st_mode)) { errno = saved; return true; }
+    sockaddr_storage address{};
+    socklen_t length = sizeof(address);
+    if (getpeername(fd, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
+        length = sizeof(address);
+        if (getsockname(fd, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
+            if (errno == EBADF) { errno = saved; return true; }
+            errno = EACCES; return false;
+        }
+    }
+    int family = address_family(reinterpret_cast<sockaddr*>(&address), length);
+    if (!family) { errno = saved; return true; }
+    auto& s = state();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    bool ok = !s.active || s.leases[family == 4 ? 0 : 1] > now();
+    if (!ok) ok = registered_probe(fd, st);
     errno = ok ? saved : EACCES;
     return ok;
 }
@@ -165,15 +206,25 @@ using Sendto = ssize_t (*)(int, const void*, size_t, int, const sockaddr*, sockl
 using Sendmsg = ssize_t (*)(int, const msghdr*, int);
 using Sendmmsg = int (*)(int, mmsghdr*, unsigned, int);
 using Gai = int (*)(const char*, const char*, const addrinfo*, addrinfo**);
+using Write = ssize_t (*)(int, const void*, size_t);
+using Writev = ssize_t (*)(int, const iovec*, int);
+using Sendfile = ssize_t (*)(int, int, off_t*, size_t);
+using Sendfile64 = ssize_t (*)(int, int, off64_t*, size_t);
+using Splice = ssize_t (*)(int, off64_t*, int, off64_t*, size_t, unsigned);
 Connect original_connect = nullptr;
 Send original_send = nullptr;
 Sendto original_sendto = nullptr;
 Sendmsg original_sendmsg = nullptr;
 Sendmmsg original_sendmmsg = nullptr;
 Gai original_gai = nullptr;
+Write original_write = nullptr;
+Writev original_writev = nullptr;
+Sendfile original_sendfile = nullptr;
+Sendfile64 original_sendfile64 = nullptr;
+Splice original_splice = nullptr;
 int guarded_connect(int fd, const sockaddr* a, socklen_t n) {
     network_audit::Scope scope;
-    if (!allow(fd, a, n)) {
+    if (!allow(fd, a, n, true)) {
         if (scope.outer()) network_audit::observe(fd, network_audit::Operation::Connect, -1, errno, a, n, true);
         return -1;
     }
@@ -182,7 +233,7 @@ int guarded_connect(int fd, const sockaddr* a, socklen_t n) {
     errno = saved;
     int result = original_connect(fd, a, n);
     saved = errno;
-    if (!local_probe.depth && !allow(fd, a, n)) {
+    if (!allow(fd, a, n)) {
         shutdown(fd, SHUT_RDWR);
         errno = EACCES;
         if (scope.outer()) network_audit::observe(fd, network_audit::Operation::Connect, -1, errno, a, n, true);
@@ -256,6 +307,27 @@ int guarded_gai(const char* node, const char* service, const addrinfo* hints, ad
     }
     return original_gai(node, service, hints, out);
 }
+ssize_t guarded_write(int fd, const void* buffer, size_t count) {
+    if (!allow_output(fd)) return -1;
+    return original_write(fd, buffer, count);
+}
+ssize_t guarded_writev(int fd, const iovec* vectors, int count) {
+    if (!allow_output(fd)) return -1;
+    return original_writev(fd, vectors, count);
+}
+ssize_t guarded_sendfile(int out, int in, off_t* offset, size_t count) {
+    if (!allow_output(out)) return -1;
+    return original_sendfile(out, in, offset, count);
+}
+ssize_t guarded_sendfile64(int out, int in, off64_t* offset, size_t count) {
+    if (!allow_output(out)) return -1;
+    return original_sendfile64(out, in, offset, count);
+}
+ssize_t guarded_splice(int in, off64_t* input_offset, int out, off64_t* output_offset,
+                       size_t count, unsigned flags) {
+    if (!allow_output(out)) return -1;
+    return original_splice(in, input_offset, out, output_offset, count, flags);
+}
 void* resolve(const char* name) {
 #ifdef FKCLAUDE_HOST_TEST
     if (state().resolver) return state().resolver(name);
@@ -269,7 +341,12 @@ Hook hooks[] = {
     {"sendto", reinterpret_cast<void*>(guarded_sendto), reinterpret_cast<void**>(&original_sendto)},
     {"sendmsg", reinterpret_cast<void*>(guarded_sendmsg), reinterpret_cast<void**>(&original_sendmsg)},
     {"sendmmsg", reinterpret_cast<void*>(guarded_sendmmsg), reinterpret_cast<void**>(&original_sendmmsg)},
-    {"getaddrinfo", reinterpret_cast<void*>(guarded_gai), reinterpret_cast<void**>(&original_gai)}
+    {"getaddrinfo", reinterpret_cast<void*>(guarded_gai), reinterpret_cast<void**>(&original_gai)},
+    {"write", reinterpret_cast<void*>(guarded_write), reinterpret_cast<void**>(&original_write)},
+    {"writev", reinterpret_cast<void*>(guarded_writev), reinterpret_cast<void**>(&original_writev)},
+    {"sendfile", reinterpret_cast<void*>(guarded_sendfile), reinterpret_cast<void**>(&original_sendfile)},
+    {"sendfile64", reinterpret_cast<void*>(guarded_sendfile64), reinterpret_cast<void**>(&original_sendfile64)},
+    {"splice", reinterpret_cast<void*>(guarded_splice), reinterpret_cast<void**>(&original_splice)}
 };
 }
 void set_hook_function(HookFunction hook) {
@@ -290,16 +367,25 @@ bool start() {
     if (!hook) return false;
     // Resolve everything before installing; retain successful patches on partial
     // failure, keeping them blocked. Java must terminate on a false result.
-    void* targets[6]{};
-    for (unsigned i = 0; i < 6; ++i) {
+    constexpr unsigned count = sizeof(hooks) / sizeof(hooks[0]);
+    void* targets[count]{};
+    for (unsigned i = 0; i < count; ++i) {
         targets[i] = resolve(hooks[i].name);
         if (!targets[i]) return false;
     }
-    for (unsigned i = 0; i < 6; ++i) {
+    for (unsigned i = 0; i < count; ++i) {
         auto& h = hooks[i];
         if (!h.installed) {
-            if (hook(targets[i], h.replacement, h.original) != 0 || !*h.original) return false;
-            h.installed = true;
+            // 64-bit libc may export sendfile/sendfile64 at one address. Patching
+            // an alias twice can wrap the gate in itself; reuse its trampoline.
+            for (unsigned j = 0; j < i; ++j)
+                if (targets[j] == targets[i] && hooks[j].installed) {
+                    *h.original = *hooks[j].original; h.installed = true; break;
+                }
+            if (!h.installed) {
+                if (hook(targets[i], h.replacement, h.original) != 0 || !*h.original) return false;
+                h.installed = true;
+            }
         }
     }
     std::lock_guard<std::mutex> lock(s.mutex);
@@ -331,6 +417,11 @@ void probe(bool enter) {
 }
 #ifdef FKCLAUDE_HOST_TEST
 void set_resolver_for_test(void* (*resolver)(const char*)) { state().resolver = resolver; }
+void deny_without_revoke_for_test() {
+    auto& s = state(); std::lock_guard<std::mutex> lock(s.mutex);
+    // Model the period between an expired lease and the worker's socket sweep.
+    s.leases[0] = s.leases[1] = 0;
+}
 void stop_for_test() {
     auto& s = state();
     { std::lock_guard<std::mutex> lock(s.mutex); s.stopping = true; s.wake.notify_all(); }

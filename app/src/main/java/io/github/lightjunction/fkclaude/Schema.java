@@ -30,6 +30,7 @@ public final class Schema {
         new Field(2, "locale", "text", "en-US", R.string.field_locale),
         new Field(2, "timezone", "text", "UTC", R.string.field_timezone),
         new Field(3, "carrier_name", "text", "", R.string.field_carrier_name),
+        new Field(3, "sim_phone_number", "text", "", R.string.field_sim_phone_number),
         new Field(3, "sim_operator", "text", "", R.string.field_sim_operator),
         new Field(3, "network_operator", "text", "", R.string.field_network_operator),
         new Field(3, "sim_country", "text", "", R.string.field_sim_country),

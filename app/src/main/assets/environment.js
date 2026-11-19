@@ -28,16 +28,19 @@
     if (on('block_web_fingerprinting') || own('user_agent') || own('build.MODEL') || own('os_release')) {
       const old = navigator.userAgentData;
       const major = (c.user_agent || '').match(/Chrom(?:e|ium)\/(\d+)/);
+      const version = (c.user_agent || '').match(/Chrom(?:e|ium)\/(\d+(?:\.\d+){3})/);
       const brands = Object.freeze(own('user_agent') ? (major ? [Object.freeze({brand:'Chromium', version:major[1]})] : []) :
         Array.from(old && old.brands || [], b => Object.freeze({brand:b.brand, version:b.version})));
       const mobile = own('user_agent') ? /Mobile|Android/.test(c.user_agent) : !!(old && old.mobile);
       const platform = own('web_platform') ? c.web_platform : 'Android';
       const low = () => ({brands, mobile, platform});
       const entropy = {
-        architecture: own('native_machine') && /x86/.test(c.native_machine) ? 'x86' : 'arm',
-        bitness: own('native_machine') && /64/.test(c.native_machine) ? '64' : '',
-        model: c['build.MODEL'] || '', platformVersion: c.os_release || '',
-        uaFullVersion: major ? major[1] + '.0.0.0' : '', fullVersionList: brands,
+        architecture: own('web_architecture') ? c.web_architecture : (own('native_machine') && /x86/.test(c.native_machine) ? 'x86' : 'arm'),
+        bitness: own('web_bitness') ? c.web_bitness : (own('native_machine') && /64/.test(c.native_machine) ? '64' : ''),
+        model: c['build.MODEL'] || '', platformVersion: own('web_platform_version') ? c.web_platform_version : (c.os_release || ''),
+        uaFullVersion: version ? version[1] : '',
+        fullVersionList: own('user_agent') ? Object.freeze(version
+          ? [Object.freeze({brand:'Chromium', version:version[1]})] : []) : brands,
         wow64: false, formFactors: Object.freeze(['Mobile'])
       };
       const data = {...low(), toJSON:low, getHighEntropyValues: async hints => {

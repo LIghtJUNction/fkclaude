@@ -18,7 +18,7 @@
     <string name="groups_5">Screen and battery</string>
     <string name="groups_6">Memory and storage</string>
     <string name="groups_7">Diagnostics and properties</string>
-    <string name="build_note">Changing API level or screen metrics can affect compatibility and layout. The privacy preset keeps these values unchanged.</string>
+    <string name="build_note">Changing API level or screen metrics can affect compatibility and layout. US privacy uses the real API level and preserves configured screen metrics.</string>
     <string name="field_claude_device_id">Claude device ID</string>
     <string name="field_android_id">Android ID</string>
     <string name="field_serial">Device serial</string>
@@ -124,8 +124,11 @@
     <string name="audit_open_error">Unable to open Claude. Check that it is enabled.</string>
     <string name="us_privacy_preset">Apply US privacy profile</string>
     <string name="field_privacy_us_only">US-only privacy policy</string>
-    <string name="us_privacy_note">US privacy blocks device location and uses US region settings inside Claude. Internet access requires the probe to report a US exit and match the IP allowlist. This does not set up a VPN; an empty allowlist stays offline. Disable US-only policy before changing its required protections.</string>
+    <string name="us_privacy_note">US privacy presents Google Pixel 8 fields and US region settings inside Claude, and blocks device location. Internet access requires a US result from the exit probe and a matching IP allowlist entry; an empty allowlist stays offline. This does not set up a VPN. Disable US-only policy before changing its required protections.</string>
     <string name="profile_load_recovery">The saved configuration could not be verified. Editing is paused. Check the saved configuration and framework status, then retry.</string>
     <string name="profile_save_error">Configuration saving or publication did not complete. Retry before starting Claude.</string>
     <string name="profile_retry">Retry loading</string>
+    <string name="field_sim_phone_number">SIM phone number (E.164)</string>
+    <string name="sim_profile_note">The US profile uses the fictional number +1 202-555-0142 and US carrier fields inside Claude. This number cannot receive calls or texts. Cell identifiers are unavailable. Unverified firmware identity fields are left empty.</string>
+    <string name="us_user_agent_note">US policy derives this value from the installed WebView engine and replaces the device label with Pixel 8.</string>
 </resources>

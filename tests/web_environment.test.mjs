@@ -116,3 +116,20 @@ test('live geolocation watch completes once without invoking the native provider
   assert.equal(run('callbacks'), 1);
   assert.equal(run('code'), 1);
 });
+
+test('Pixel projection retains the installed engine version in full client hints', async () => {
+  const ua = 'Mozilla/5.0 (Linux; Android 16; Pixel 8; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.7390.122 Mobile Safari/537.36';
+  const run = environment({locale:'en-US', user_agent:ua, web_platform:'Android', web_vendor:'Google Inc.', 'build.MODEL':'Pixel 8',
+    web_platform_version:'16', web_architecture:'', web_bitness:'', os_release:'untrusted', native_machine:'untrusted'});
+  assert.equal(run('navigator.userAgent'), ua);
+  assert.equal(run('navigator.platform'), 'Android');
+  const hints = await run('navigator.userAgentData.getHighEntropyValues(["model","uaFullVersion","fullVersionList","platformVersion","architecture","bitness"])');
+  assert.equal(hints.model, 'Pixel 8');
+  assert.equal(hints.uaFullVersion, '141.0.7390.122');
+  assert.equal(hints.platformVersion, '16');
+  assert.equal(hints.architecture, '');
+  assert.equal(hints.bitness, '');
+  assert.equal(hints.fullVersionList[0].version, '141.0.7390.122');
+  assert.equal(hints.brands[0].version, '141');
+  assert.equal(hints.platform, 'Android');
+});

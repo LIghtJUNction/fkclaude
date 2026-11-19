@@ -90,7 +90,7 @@ public final class Profile {
         map.put("ip_guard_interval", "3");
         for (String key : new String[]{"block_sensors", "block_location", "block_personal_data", "block_package_list", "block_sift"})
             map.put(key, "true");
-        for (String key : new String[]{"carrier_name", "sim_operator", "network_operator", "sim_country", "network_country"})
+        for (String key : new String[]{"carrier_name", "sim_phone_number", "sim_operator", "network_operator", "sim_country", "network_country"})
             map.put(key, "");
         map.put("wifi_ssid", "<unknown ssid>");
         map.put("wifi_bssid", "02:00:00:00:00:00");
@@ -154,6 +154,8 @@ public final class Profile {
             throw new IllegalArgumentException("claude_device_id: canonical UUID required");
         if (key.equals("android_id") && !value.isEmpty() && !value.matches("[0-9a-f]{16}"))
             throw new IllegalArgumentException("android_id: 16 lowercase hex digits");
+        if (key.equals("sim_phone_number") && !value.isEmpty() && !value.matches("\\+[1-9][0-9]{1,14}"))
+            throw new IllegalArgumentException("sim_phone_number: E.164 number or empty required");
         if (key.equals("timezone") && !Set.of(TimeZone.getAvailableIDs()).contains(value))
             throw new IllegalArgumentException("Unknown timezone");
         if (key.equals("locale") && (value.isEmpty() || Locale.forLanguageTag(value).getLanguage().isEmpty()

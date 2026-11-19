@@ -40,9 +40,12 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
     private Profile profile;
     private boolean initialized;
     private int hookCount;
+    private String projectedUserAgent;
+    // Read the platform level before any configured Build projection changes it.
+    private final int platformSdk = Build.VERSION.SDK_INT;
     private final Set<String> reported = Collections.synchronizedSet(new HashSet<>());
     private final Map<String, String> androidProperties = new HashMap<>();
-    private final Map<String, String> javaProperties = new HashMap<>();
+    private final Map<String, String> javaProperties = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Set<String> REQUIRED_US_HOOKS = Set.of(
             "android.location.LocationManager#getLastKnownLocation",
             "android.location.LocationManager#getCurrentLocation",
@@ -55,10 +58,28 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             "android.content.res.Resources#getConfiguration",
             "android.telephony.TelephonyManager#getNetworkCountryIso",
             "android.telephony.TelephonyManager#getSimCountryIso",
+            "android.telephony.TelephonyManager#getAllCellInfo",
+            "android.telephony.TelephonyManager#getCellLocation",
+            "android.telephony.TelephonyManager#getServiceState",
+            "android.telephony.TelephonyManager#requestCellInfoUpdate",
+            "android.telephony.TelephonyManager#listen",
+            "android.telephony.TelephonyManager#registerTelephonyCallback",
+            "android.telephony.SubscriptionManager#getActiveSubscriptionInfoList",
+            "android.os.SystemProperties#get", "android.os.SystemProperties#getInt",
+            "android.os.SystemProperties#getLong", "android.os.SystemProperties#getBoolean",
+            "android.os.Build#getSerial", "java.lang.System#getProperty",
+            "android.webkit.WebSettings#getDefaultUserAgent",
             "android.provider.Settings$Secure#getString",
             "android.net.wifi.WifiInfo#getSSID", "android.net.wifi.WifiInfo#getBSSID",
             "android.net.wifi.WifiInfo#getMacAddress");
+    private final Set<String> requiredPolicyHooks = requiredPolicyHooks();
     private final Set<String> installedPolicyHooks = new HashSet<>();
+
+    private Set<String> requiredPolicyHooks() {
+        Set<String> required = new HashSet<>(REQUIRED_US_HOOKS);
+        required.addAll(SimIdentity.requiredHooks(platformSdk));
+        return Set.copyOf(required);
+    }
     @FunctionalInterface private interface Action { void run(XC_MethodHook.MethodHookParam param) throws Throwable; }
     @Override public void initZygote(StartupParam param) { modulePath = param.modulePath; }
 
@@ -111,7 +132,7 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
                                      + ";us_only=" + profile.flag("privacy_us_only")));
             // Standard privacy controls remain active even when targeted app hooks are unavailable.
             if (profile.flag("privacy_us_only")) {
-                installPlatformPrivacy(loader);
+                installPlatformPrivacy(context, loader);
                 selfCheck(context);
             }
             if (version != Profile.TARGET_VERSION) {
@@ -169,6 +190,50 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             if (phone != null && profile.get("sim_country").equals(phone.getSimCountryIso())) passed++;
             checks++;
             if (phone != null && profile.get("network_country").equals(phone.getNetworkCountryIso())) passed++;
+            // These getters are checked only after all required hooks have been installed.
+            checks++;
+            if (syntheticLineNumberMatches(phone)) passed++;
+            checks++;
+            if (phone != null && profile.get("sim_operator").equals(phone.getSimOperator())) passed++;
+            checks++;
+            if (phone != null && profile.get("network_operator").equals(phone.getNetworkOperator())) passed++;
+            checks++;
+            if (phone != null && profile.get("carrier_name").equals(phone.getSimOperatorName())) passed++;
+            if (platformSdk >= 33) {
+                android.telephony.SubscriptionManager subscriptions = context.getSystemService(android.telephony.SubscriptionManager.class);
+                checks++;
+                if (syntheticSubscriptionNumberMatches(subscriptions)) passed++;
+            }
+            android.telecom.PhoneAccount syntheticAccount = new android.telecom.PhoneAccount.Builder(
+                    new android.telecom.PhoneAccountHandle(
+                            new android.content.ComponentName("io.github.lightjunction.fkclaude", "PolicyCheck"),
+                            "fkclaude-policy-check"), "Policy check")
+                    .setAddress(Uri.fromParts("tel", profile.get("sim_phone_number"), null))
+                    .setSubscriptionAddress(Uri.fromParts("tel", profile.get("sim_phone_number"), null)).build();
+            checks++;
+            if (syntheticAccount.getAddress() == null) passed++;
+            checks++;
+            if (syntheticAccount.getSubscriptionAddress() == null) passed++;
+            checks++;
+            if ("PhoneAccount[private]".equals(syntheticAccount.toString())) passed++;
+            for (Schema.Field field : Schema.FIELDS) if (field.key().startsWith("build.") && profile.has(field.key())) {
+                checks++;
+                if (profile.get(field.key()).equals(XposedHelpers.getStaticObjectField(Build.class, field.key().substring(6)))) passed++;
+            }
+            for (String[] binding : PropertyView.REDACTED_BUILD_PROPERTIES) {
+                checks++;
+                if ("".equals(XposedHelpers.getStaticObjectField(Build.class, binding[0]))) passed++;
+            }
+            Class<?> systemProperties = XposedHelpers.findClass("android.os.SystemProperties", context.getClassLoader());
+            for (String[] binding : new String[][]{{"ro.product.model", "build.MODEL"},
+                    {"ro.product.manufacturer", "build.MANUFACTURER"}, {"ro.product.device", "build.DEVICE"}}) {
+                checks++;
+                if (profile.get(binding[1]).equals(XposedHelpers.callStaticMethod(systemProperties, "get", binding[0]))) passed++;
+            }
+            checks++;
+            if (projectedUserAgent.equals(android.webkit.WebSettings.getDefaultUserAgent(context))) passed++;
+            checks++;
+            if (projectedUserAgent.equals(System.getProperty("http.agent"))) passed++;
             // Synthetic values only: verify blocked accessors without requesting a real device fix.
             android.location.Location synthetic = new android.location.Location("fkclaude-policy-check");
             android.location.Location other = new android.location.Location("fkclaude-policy-check");
@@ -186,26 +251,56 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             throw new IllegalStateException("Privacy readback verification failed");
     }
 
+    // Diagnostics call only our installed BEFORE hooks. Never request a real telephony permission
+    // or fall back to the device service if interception is missing or access is denied.
+    @android.annotation.SuppressLint("MissingPermission")
+    private boolean syntheticLineNumberMatches(android.telephony.TelephonyManager phone) {
+        if (!profile.flag("privacy_us_only")
+                || !installedPolicyHooks.contains("android.telephony.TelephonyManager#getLine1Number"))
+            throw new IllegalStateException("Synthetic line-number hook unavailable");
+        if (phone == null) return false;
+        try { return profile.get("sim_phone_number").equals(phone.getLine1Number()); }
+        catch (SecurityException denied) { return false; }
+    }
+
+    @android.annotation.TargetApi(33)
+    @android.annotation.SuppressLint("MissingPermission")
+    private boolean syntheticSubscriptionNumberMatches(android.telephony.SubscriptionManager subscriptions) {
+        if (platformSdk < 33 || !profile.flag("privacy_us_only")
+                || !installedPolicyHooks.contains("android.telephony.SubscriptionManager#getPhoneNumber"))
+            throw new IllegalStateException("Synthetic subscription-number hook unavailable");
+        if (subscriptions == null) return false;
+        try { return profile.get("sim_phone_number").equals(
+                subscriptions.getPhoneNumber(android.telephony.SubscriptionManager.INVALID_SUBSCRIPTION_ID)); }
+        catch (SecurityException denied) { return false; }
+    }
+
     private static boolean locationReadDenied(Runnable query) {
         try { query.run(); return false; }
         catch (SecurityException expected) { return true; }
     }
 
-    private void installPlatformPrivacy(ClassLoader loader) throws Throwable {
+    private void installPlatformPrivacy(Context context, ClassLoader loader) throws Throwable {
         buildProperties(loader);
         NativeBridge.install(profile, androidProperties);
+        projectedUserAgent = profile.has("user_agent") ? profile.get("user_agent") : null;
+        if (profile.flag("privacy_us_only")) {
+            // This one internal read occurs before our UA hook; the original is never logged or stored.
+            projectedUserAgent = PixelUserAgent.project(android.webkit.WebSettings.getDefaultUserAgent(context));
+            javaProperties.put("http.agent", projectedUserAgent);
+        }
         environmentAndCommands(loader);
         androidIdentity(loader);
         locale(loader);
         network(loader);
         privateData(loader);
-        WebEnvironment.install(profile, modulePath);
-        if (profile.flag("privacy_us_only") && !installedPolicyHooks.containsAll(REQUIRED_US_HOOKS))
+        WebEnvironment.install(profile, modulePath, projectedUserAgent, loader);
+        if (profile.flag("privacy_us_only") && !installedPolicyHooks.containsAll(requiredPolicyHooks))
             throw new IllegalStateException("Required privacy hooks missing");
     }
 
     private void install(Context context, ClassLoader loader) throws Throwable {
-        if (!profile.flag("privacy_us_only")) installPlatformPrivacy(loader);
+        if (!profile.flag("privacy_us_only")) installPlatformPrivacy(context, loader);
         identity(loader);
         screen(loader);
         battery(loader);
@@ -215,7 +310,7 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
         outbound(loader);
     }
 
-    private void hook(String cls, ClassLoader loader, String name, boolean before, Action action) {
+    private int hook(String cls, ClassLoader loader, String name, boolean before, Action action) {
         String signature = cls + "#" + name;
         int installed = 0;
         try {
@@ -235,20 +330,21 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             });
             installed = hooks.size();
             hookCount += installed;
-            if (installed > 0 && REQUIRED_US_HOOKS.contains(signature)) installedPolicyHooks.add(signature);
+            if (installed > 0 && requiredPolicyHooks.contains(signature)) installedPolicyHooks.add(signature);
             if (hooks.isEmpty() && reported.add(signature)) log("unavailable: " + signature);
         } catch (Throwable e) {
             if (reported.add(signature)) log("unavailable: " + signature);
         }
-        if (installed == 0 && profile.flag("privacy_us_only") && REQUIRED_US_HOOKS.contains(signature))
+        if (installed == 0 && profile.flag("privacy_us_only") && requiredPolicyHooks.contains(signature))
             throw new IllegalStateException("Required privacy hook unavailable: " + signature);
+        return installed;
     }
     private void value(String cls, ClassLoader loader, String name, String key) {
         if (!profile.has(key)) return;
         hook(cls, loader, name, true, param -> param.setResult(convert(profile.get(key), ((Method) param.method).getReturnType())));
     }
     private static Object convert(String value, Class<?> type) {
-        if (type == String.class) return value;
+        if (type == String.class || type == CharSequence.class) return value;
         if (type == boolean.class || type == Boolean.class) return Boolean.parseBoolean(value);
         if (type == int.class || type == Integer.class) return Integer.parseInt(value);
         if (type == long.class || type == Long.class) return Long.parseLong(value);
@@ -256,12 +352,26 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
         if (type == double.class || type == Double.class) return Double.parseDouble(value);
         throw new IllegalArgumentException("Unsupported return type");
     }
+    private void setBuildField(String name, String value) {
+        try {
+            XposedHelpers.setStaticObjectField(Build.class, name, value);
+            if (profile.flag("privacy_us_only")
+                    && !value.equals(XposedHelpers.getStaticObjectField(Build.class, name)))
+                throw new IllegalStateException("Build identity readback mismatch");
+        } catch (Throwable e) {
+            log("Build field unavailable: " + name);
+            if (profile.flag("privacy_us_only"))
+                throw new IllegalStateException("Required Build identity unavailable", e);
+        }
+    }
+
     private void buildProperties(ClassLoader loader) {
         for (Schema.Field item : Schema.FIELDS) if (item.key().startsWith("build.") && profile.has(item.key())) {
             String name = item.key().substring(6);
-            try { XposedHelpers.setStaticObjectField(Build.class, name, profile.get(item.key())); }
-            catch (Throwable e) { log("Build field unavailable: " + name); }
+            setBuildField(name, profile.get(item.key()));
         }
+        if (profile.flag("privacy_us_only"))
+            for (String[] binding : PropertyView.REDACTED_BUILD_PROPERTIES) setBuildField(binding[0], "");
         if (profile.has("serial")) {
             XposedHelpers.setStaticObjectField(Build.class, "SERIAL", profile.get("serial"));
             value("android.os.Build", loader, "getSerial", "serial");
@@ -387,6 +497,7 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
                 {"getNetworkOperator", "network_operator"}, {"getSimOperator", "sim_operator"},
                 {"getSimCountryIso", "sim_country"}, {"getNetworkCountryIso", "network_country"}};
         for (String[] item : phone) value("android.telephony.TelephonyManager", loader, item[0], item[1]);
+        simIdentity(loader);
         value("android.net.wifi.WifiInfo", loader, "getSSID", "wifi_ssid");
         value("android.net.wifi.WifiInfo", loader, "getBSSID", "wifi_bssid");
         value("android.net.wifi.WifiInfo", loader, "getMacAddress", "wifi_mac");
@@ -423,27 +534,53 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             hook("android.net.NetworkCapabilities", loader, "getTransportTypes", true, p ->
                     p.setResult(new int[]{(int) profile.number("network_transport")}));
         }
-        if (profile.has("user_agent")) {
-            value("android.webkit.WebSettings", loader, "getDefaultUserAgent", "user_agent");
-            // WebSettings.getUserAgentString is abstract. Hook the actual provider after WebView creates it.
+        if (projectedUserAgent != null) {
+            final String userAgent = projectedUserAgent;
+            final boolean strict = profile.flag("privacy_us_only");
+            hook("android.webkit.WebSettings", loader, "getDefaultUserAgent", true, p -> p.setResult(userAgent));
+            // WebSettings getters/setters are abstract. Require both concrete provider hooks in strict mode.
             try {
-                hookCount += XposedBridge.hookAllConstructors(android.webkit.WebView.class, new XC_MethodHook() {
+                Set<XC_MethodHook.Unhook> constructors = XposedBridge.hookAllConstructors(android.webkit.WebView.class, new XC_MethodHook() {
                     @Override protected void afterHookedMethod(MethodHookParam p) {
                         if (p.hasThrowable()) return;
                         try {
                             android.webkit.WebSettings settings = ((android.webkit.WebView) p.thisObject).getSettings();
-                            settings.setUserAgentString(profile.get("user_agent"));
-                            String concrete = settings.getClass().getName();
-                            if (reported.add("web-settings:" + concrete)) {
-                                hook(concrete, settings.getClass().getClassLoader(), "getUserAgentString", true,
-                                        call -> call.setResult(profile.get("user_agent")));
-                                hook(concrete, settings.getClass().getClassLoader(), "setUserAgentString", true,
-                                        call -> call.args[0] = profile.get("user_agent"));
+                            String concrete = settings.getClass().getName(), key = "web-settings:" + concrete;
+                            synchronized (reported) {
+                                if (!reported.contains(key)) {
+                                    int getters = hook(concrete, settings.getClass().getClassLoader(), "getUserAgentString", true,
+                                            call -> call.setResult(userAgent));
+                                    int setters = hook(concrete, settings.getClass().getClassLoader(), "setUserAgentString", true,
+                                            call -> call.args[0] = userAgent);
+                                    int metadata = strict ? hook(concrete, settings.getClass().getClassLoader(),
+                                            "setUserAgentString", false, call -> {
+                                                try { WebEnvironment.applyMetadata((android.webkit.WebSettings) call.thisObject); }
+                                                catch (Throwable failure) {
+                                                    // The original setter already ran. A host may catch an exception,
+                                                    // so stop this process before an existing WebView can keep loading.
+                                                    try { log("strict privacy blocked: web_metadata_unverified"); }
+                                                    finally { android.os.Process.killProcess(android.os.Process.myPid()); }
+                                                    throw failure;
+                                                }
+                                            }) : 1;
+                                    if (strict && (getters == 0 || setters == 0 || metadata == 0))
+                                        throw new IllegalStateException("Required WebView user agent hooks unavailable");
+                                    reported.add(key);
+                                }
                             }
-                        } catch (Throwable e) { if (reported.add("web-settings:error")) log("WebView settings override unavailable"); }
+                            settings.setUserAgentString(userAgent);
+                        } catch (Throwable e) {
+                            if (reported.add("web-settings:error")) log("WebView settings override unavailable");
+                            if (strict) p.setThrowable(new SecurityException("Web identity policy unavailable"));
+                        }
                     }
-                }).size();
-            } catch (Throwable e) { log("WebView constructors unavailable"); }
+                });
+                hookCount += constructors.size();
+                if (strict && constructors.isEmpty()) throw new IllegalStateException("WebView constructors unavailable");
+            } catch (Throwable e) {
+                log("WebView constructors unavailable");
+                if (strict) throw new IllegalStateException("Web identity policy unavailable", e);
+            }
         }
     }
     private static byte[] ipv4(String ip) {
@@ -527,6 +664,64 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             });
     }
 
+    private void simIdentity(ClassLoader loader) {
+        String number = SimIdentity.phone(profile);
+        if (number != null) {
+            for (String method : new String[]{"getLine1Number", "getMsisdn"})
+                hook("android.telephony.TelephonyManager", loader, method, true, p -> p.setResult(number));
+            hook("android.telecom.TelecomManager", loader, "getLine1Number", true, p -> p.setResult(number));
+            hook("android.telephony.SubscriptionInfo", loader, "getNumber", true, p -> p.setResult(number));
+            if (platformSdk >= 33)
+                hook("android.telephony.SubscriptionManager", loader, "getPhoneNumber", true, p -> p.setResult(number));
+        }
+        if (profile.flag("privacy_us_only")) {
+            hook("android.telecom.TelecomManager", loader, "getPhoneAccount", true, p -> p.setResult(null));
+            for (String method : new String[]{"getAddress", "getSubscriptionAddress"})
+                hook("android.telecom.PhoneAccount", loader, method, true, p -> p.setResult(null));
+            hook("android.telecom.PhoneAccount", loader, "writeToParcel", true,
+                    p -> p.setThrowable(new SecurityException("Phone account unavailable by privacy policy")));
+            hook("android.telecom.PhoneAccount", loader, "toString", true, p -> p.setResult("PhoneAccount[private]"));
+        }
+        boolean locationBlocked = profile.flag("block_location");
+        String info = "android.telephony.SubscriptionInfo";
+        if (locationBlocked || profile.has("sim_country"))
+            hook(info, loader, "getCountryIso", true, p -> p.setResult(profile.get("sim_country", "")));
+        if (locationBlocked || profile.has("sim_operator")) {
+            String mcc = SimIdentity.operatorPart(profile, true), mnc = SimIdentity.operatorPart(profile, false);
+            hook(info, loader, "getMccString", true, p -> p.setResult(mcc));
+            hook(info, loader, "getMncString", true, p -> p.setResult(mnc));
+            hook(info, loader, "getMcc", true, p -> p.setResult(mcc.isEmpty() ? 0 : Integer.parseInt(mcc)));
+            hook(info, loader, "getMnc", true, p -> p.setResult(mnc.isEmpty() ? 0 : Integer.parseInt(mnc)));
+        }
+        if (locationBlocked || profile.has("carrier_name")) {
+            String carrier = profile.get("carrier_name", "");
+            for (String method : new String[]{"getCarrierName", "getDisplayName"})
+                hook(info, loader, method, true, p -> p.setResult(carrier));
+            for (String method : new String[]{"getSimCarrierIdName", "getSimSpecificCarrierIdName"})
+                hook("android.telephony.TelephonyManager", loader, method, true, p -> p.setResult(carrier));
+        }
+        if (profile.flag("block_personal_data")) {
+            for (String method : new String[]{"getSubscriberId", "getSimSerialNumber", "getDeviceId", "getImei", "getMeid",
+                    "getVoiceMailNumber", "getVoiceMailAlphaTag", "getGroupIdLevel1"})
+                hook("android.telephony.TelephonyManager", loader, method, true, p -> p.setResult(""));
+            for (String method : new String[]{"getIccId", "getCardString", "getGroupOwner"})
+                hook(info, loader, method, true, p -> p.setResult(""));
+            hook(info, loader, "getGroupUuid", true, p -> p.setResult(null));
+            hook(info, loader, "getCardId", true, p -> p.setResult(-1));
+            // Parcel and diagnostic formatting use fields directly, bypassing the accessors above.
+            hook(info, loader, "writeToParcel", true,
+                    p -> p.setThrowable(new SecurityException("SIM details unavailable by privacy policy")));
+            hook(info, loader, "toString", true, p -> p.setResult("SubscriptionInfo[private]"));
+        }
+        if (locationBlocked) {
+            hook(info, loader, "getCarrierId", true, p -> p.setResult(-1));
+            for (String method : new String[]{"getSimCarrierId", "getSimSpecificCarrierId", "getCarrierIdFromSimMccMnc"})
+                hook("android.telephony.TelephonyManager", loader, method, true, p -> p.setResult(-1));
+            for (String method : new String[]{"getEhplmns", "getHplmns"})
+                hook(info, loader, method, true, p -> p.setResult(new String[0]));
+        }
+    }
+
     private void locationSideChannels(ClassLoader loader) {
         for (String method : new String[]{"getAllCellInfo", "getNeighboringCellInfo"})
             hook("android.telephony.TelephonyManager", loader, method, true, p -> p.setResult(Collections.emptyList()));
@@ -552,12 +747,6 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
         for (String method : new String[]{"getActiveSubscriptionInfo", "getActiveSubscriptionInfoForSimSlotIndex",
                 "getActiveSubscriptionInfoForIccIndex"})
             hook("android.telephony.SubscriptionManager", loader, method, true, p -> p.setResult(null));
-        hook("android.telephony.SubscriptionInfo", loader, "getCountryIso", true,
-                p -> p.setResult(profile.get("sim_country", "")));
-        for (String method : new String[]{"getMccString", "getMncString"})
-            hook("android.telephony.SubscriptionInfo", loader, method, true, p -> p.setResult(""));
-        for (String method : new String[]{"getMcc", "getMnc"})
-            hook("android.telephony.SubscriptionInfo", loader, method, true, p -> p.setResult(0));
         for (String method : new String[]{"getScanResults", "getConfiguredNetworks", "getPrivilegedConfiguredNetworks"})
             hook("android.net.wifi.WifiManager", loader, method, true, p -> p.setResult(Collections.emptyList()));
         hook("android.net.wifi.WifiManager", loader, "startScan", true, p -> p.setResult(false));

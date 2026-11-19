@@ -20,6 +20,23 @@ final class PropertyView {
             {"ro.build.version.sdk", "sdk_level"}, {"ro.serialno", "serial"}, {"ro.boot.serialno", "serial"},
             {"persist.sys.locale", "locale"}, {"persist.sys.timezone", "timezone"}
     };
+    static final String[][] REDACTED_BUILD_PROPERTIES = {
+            {"SOC_MANUFACTURER", "ro.soc.manufacturer"}, {"SOC_MODEL", "ro.soc.model"},
+            {"SKU", "ro.boot.hardware.sku"}, {"ODM_SKU", "ro.boot.product.hardware.sku"}
+    };
+    private static final String[] PRODUCT_PARTITIONS = {"system", "system_ext", "vendor", "odm", "product"};
+    private static final String[][] PRODUCT_ALIASES = {
+            {"manufacturer", "build.MANUFACTURER"}, {"brand", "build.BRAND"}, {"model", "build.MODEL"},
+            {"device", "build.DEVICE"}, {"name", "build.PRODUCT"}
+    };
+    private static final String[] BUILD_PARTITIONS = {
+            "system", "system_ext", "vendor", "odm", "product", "bootimage", "vendor_dlkm", "odm_dlkm"
+    };
+    private static final String[][] BUILD_ALIASES = {
+            {"fingerprint", "build.FINGERPRINT"}, {"id", "build.ID"},
+            {"tags", "build.TAGS"}, {"type", "build.TYPE"}
+    };
+
     static Map<String, String> parse(String text) {
         Properties props = new Properties();
         try { props.load(new StringReader(text)); }
@@ -38,6 +55,17 @@ final class PropertyView {
     static Map<String, String> properties(Profile profile) {
         Map<String, String> properties = parse(profile.get("system_properties", ""));
         for (String[] binding : BINDINGS) if (profile.has(binding[1])) properties.put(binding[0], profile.get(binding[1]));
+        for (String partition : PRODUCT_PARTITIONS) for (String[] binding : PRODUCT_ALIASES)
+            if (profile.has(binding[1]))
+                properties.put("ro.product." + partition + "." + binding[0], profile.get(binding[1]));
+        for (String partition : BUILD_PARTITIONS) for (String[] binding : BUILD_ALIASES)
+            if (profile.has(binding[1]))
+                properties.put("ro." + partition + ".build." + binding[0], profile.get(binding[1]));
+        if (profile.flag("privacy_us_only")) {
+            for (String[] binding : REDACTED_BUILD_PROPERTIES) properties.put(binding[1], "");
+            for (String key : new String[]{"ro.build.description", "ro.board.platform", "ro.boot.hardware"})
+                properties.put(key, "");
+        }
         return properties;
     }
     static Map<String, String> environment(Profile profile) {

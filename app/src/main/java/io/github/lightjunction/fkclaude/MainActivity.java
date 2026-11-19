@@ -108,6 +108,7 @@ public final class MainActivity extends Activity {
                 section.setOrientation(LinearLayout.VERTICAL);
                 section.setVisibility(group == 0 ? View.VISIBLE : View.GONE);
                 root.addView(section);
+                if (group == 3) section.addView(text(getString(R.string.sim_profile_note)));
                 LinearLayout content = section;
                 heading.setCompoundDrawablesWithIntrinsicBounds(0, 0, group == 0
                         ? android.R.drawable.arrow_up_float : android.R.drawable.arrow_down_float, 0);
@@ -120,13 +121,18 @@ public final class MainActivity extends Activity {
                 heading.setFocusable(true);
             }
             section.addView(text(getString(field.label())));
+            if (profile.flag("privacy_us_only") && field.key().equals("user_agent")) {
+                section.addView(text(getString(R.string.us_user_agent_note)));
+                continue;
+            }
             Spinner mode = new Spinner(this);
             mode.setAdapter(ArrayAdapter.createFromResource(this, R.array.modes, android.R.layout.simple_spinner_dropdown_item));
             section.addView(mode);
             EditText input = new EditText(this);
             boolean multiline = field.key().endsWith("properties") || field.key().equals("native_env") || field.key().equals("native_mount") || field.key().equals("ip_guard_cidrs");
             input.setSingleLine(!multiline);
-            if (field.type().equals("long")) input.setInputType(InputType.TYPE_CLASS_NUMBER);
+            if (field.key().equals("sim_phone_number")) input.setInputType(InputType.TYPE_CLASS_PHONE);
+            else if (field.type().equals("long")) input.setInputType(InputType.TYPE_CLASS_NUMBER);
             else if (field.type().equals("float")) input.setInputType(InputType.TYPE_CLASS_NUMBER
                     | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
             else input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS

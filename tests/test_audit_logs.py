@@ -1,4 +1,5 @@
 import contextlib
+import gzip
 import importlib.util
 import io
 import json
@@ -243,6 +244,128 @@ class AuditLogAnalysisTest(unittest.TestCase):
         report = audit.analyze([huge])
         self.assertEqual(1, report["invalid"]["oversized_line"])
         self.assertEqual(1, report["input"]["unique_valid_events"])
+
+    def test_export_retained_detects_whole_line_truncation_and_extra_events(self):
+        for name, expected, rows in (
+            ("missing-last", 3, [event(1), event(2)]),
+            ("manifest-only", 3, []),
+            ("extra", 2, [event(1), event(2), event(3)]),
+        ):
+            with self.subTest(case=name):
+                manifest = {"schema": "fkclaude.audit.export.v1", "retained": expected}
+                path = self.write(name + ".ndjson", [manifest, *rows])
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    status = audit.main([str(path), "--json"])
+                report = json.loads(output.getvalue())
+                self.assertEqual(2, status)
+                self.assertFalse(report["complete_input"])
+                self.assertEqual(1, report["invalid"]["export_retained_mismatch"])
+                self.assertEqual(1, report["export_validation"]["mismatched_blocks"])
+                self.assertEqual(expected, report["export_validation"]["declared_event_rows"])
+                self.assertEqual(len(rows), report["export_validation"]["observed_valid_event_rows"])
+                self.assertIn("1 块计数不符", audit.human_summary(report))
+                self.assertEqual(0, report["sequence"]["internal_missing_sequences"])
+
+    def test_each_export_block_is_checked_instead_of_combined_totals(self):
+        path = self.write("joined.ndjson", [
+            {"schema": "fkclaude.audit.export.v1", "retained": 2}, event(1),
+            {"schema": "fkclaude.audit.export.v1", "retained": 1}, event(2), event(3),
+        ])
+        report = audit.analyze([path])
+        exports = report["export_validation"]
+        self.assertEqual(3, exports["declared_event_rows"])
+        self.assertEqual(3, exports["observed_valid_event_rows"])
+        self.assertEqual(2, exports["mismatched_blocks"])
+        self.assertEqual(2, report["invalid"]["export_retained_mismatch"])
+        self.assertFalse(report["complete_input"])
+
+    def test_export_counts_precede_deduplication_and_stop_at_file_boundaries(self):
+        manifest = {"schema": "fkclaude.audit.export.v1", "retained": 3}
+        rows = [manifest, event(1), event(2), event(3)]
+        first = self.write("first.ndjson", rows)
+        second = self.write("second.ndjson", rows)
+        rotation = self.write("audit.1.jsonl", [event(1), event(2)])
+        report = audit.analyze([first, second, rotation])
+        self.assertTrue(report["complete_input"])
+        self.assertEqual(3, report["input"]["unique_valid_events"])
+        self.assertEqual(5, report["input"]["duplicate_events"])
+        self.assertEqual(2, report["export_validation"]["matched_blocks"])
+        self.assertEqual(6, report["export_validation"]["declared_event_rows"])
+        self.assertEqual(6, report["export_validation"]["observed_valid_event_rows"])
+        joined = self.write("duplicate-blocks.ndjson", rows + rows)
+        joined_report = audit.analyze([joined])
+        self.assertTrue(joined_report["complete_input"])
+        self.assertEqual(2, joined_report["export_validation"]["matched_blocks"])
+        self.assertEqual(3, joined_report["input"]["duplicate_events"])
+
+    def test_export_count_validation_precedes_view_filter(self):
+        path = self.write("filtered.ndjson", [
+            {"schema": "fkclaude.audit.export.v1", "retained": 3},
+            event(1), event(2, category="camera"), event(3, category="conversation"),
+        ])
+        report = audit.analyze([path], non_conversation=True)
+        self.assertTrue(report["complete_input"])
+        self.assertEqual(1, report["input"]["selected_events"])
+        self.assertEqual(2, report["input"]["filtered_events"])
+        self.assertEqual(1, report["export_validation"]["matched_blocks"])
+        self.assertEqual(3, report["export_validation"]["observed_valid_event_rows"])
+
+    def test_empty_exports_and_manifest_free_rotations_remain_valid(self):
+        empty = self.write("empty.ndjson", [
+            {"schema": "fkclaude.audit.export.v1", "retained": 0}])
+        report = audit.analyze([empty])
+        self.assertTrue(report["complete_input"])
+        self.assertEqual(1, report["export_validation"]["matched_blocks"])
+        first = self.write("audit.jsonl", [event(2), event(3)])
+        rotation = self.write("audit.1.jsonl", [event(1), event(2)])
+        report = audit.analyze([first, rotation])
+        self.assertTrue(report["complete_input"])
+        self.assertEqual(3, report["input"]["unique_valid_events"])
+        self.assertEqual(1, report["input"]["duplicate_events"])
+        self.assertEqual(0, report["input"]["export_manifests"])
+        self.assertEqual(0, report["export_validation"]["matched_blocks"])
+
+    def test_complete_export_does_not_require_a_final_newline(self):
+        path = self.write("no-newline.ndjson", [
+            {"schema": "fkclaude.audit.export.v1", "retained": 1}, event(1)])
+        path.write_bytes(path.read_bytes().removesuffix(b"\n"))
+        report = audit.analyze([path])
+        self.assertTrue(report["complete_input"])
+        self.assertEqual(1, report["export_validation"]["matched_blocks"])
+        self.assertEqual(1, report["truncated"]["valid_json_without_final_newline"])
+
+    def test_budget_limited_exports_are_not_marked_as_matching(self):
+        path = self.write("limited.ndjson", [
+            {"schema": "fkclaude.audit.export.v1", "retained": 3},
+            event(1), event(2), event(3),
+        ])
+        report = audit.analyze([path], max_events=1)
+        self.assertFalse(report["complete_input"])
+        self.assertTrue(report["truncated"]["limits_reached"]["events"])
+        self.assertEqual(1, report["export_validation"]["incomplete_blocks"])
+        self.assertEqual(0, report["export_validation"]["matched_blocks"])
+        self.assertEqual(0, report["export_validation"]["mismatched_blocks"])
+
+    def test_corrupt_gzip_is_reported_and_later_files_are_still_read(self):
+        good = self.write("good.ndjson", [
+            {"schema": "fkclaude.audit.export.v1", "retained": 2}, event(1), event(2)])
+        compressed = bytearray(gzip.compress(good.read_bytes()))
+        # Reserved DEFLATE block type: a damaged stream raises zlib.error.
+        compressed[10] = (compressed[10] & ~6) | 6
+        damaged = self.root / "PRIVATE-damaged.ndjson.gz"
+        damaged.write_bytes(compressed)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status = audit.main([str(damaged), str(good), "--json"])
+        report = json.loads(output.getvalue())
+        self.assertEqual(2, status)
+        self.assertFalse(report["complete_input"])
+        self.assertEqual(1, report["input"]["file_errors"])
+        self.assertEqual(2, report["input"]["files_read"])
+        self.assertEqual(2, report["input"]["unique_valid_events"])
+        self.assertEqual(1, report["export_validation"]["matched_blocks"])
+        self.assertNotIn("PRIVATE-", output.getvalue())
 
     def test_export_counters_are_maxima_not_added_duplicate_totals(self):
         manifest = {"schema": "fkclaude.audit.export.v1", "retained": 1,

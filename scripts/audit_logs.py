@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import zlib
 from urllib.parse import urlsplit
 
 MAX_BYTES = 64 * 1024 * 1024
@@ -243,10 +244,30 @@ def analyze(paths, *, non_conversation=False, max_bytes=MAX_BYTES, max_events=MA
     native_byte_events = Counter(application=0, instrumentation=0, unknown=0)
     endpoints = {}
     declared = Counter()
+    export_counts = Counter(matched_blocks=0, mismatched_blocks=0, incomplete_blocks=0,
+                            manifests_without_retained=0, declared_event_rows=0,
+                            observed_valid_event_rows=0)
+    export_block = None
     stop = False
 
+    def finish_export_block(*, incomplete=False):
+        nonlocal export_block
+        if export_block is None:
+            return
+        expected, observed = export_block
+        export_counts["declared_event_rows"] += expected
+        export_counts["observed_valid_event_rows"] += observed
+        if incomplete:
+            export_counts["incomplete_blocks"] += 1
+        elif observed != expected:
+            export_counts["mismatched_blocks"] += 1
+            invalid["export_retained_mismatch"] += 1
+        else:
+            export_counts["matched_blocks"] += 1
+        export_block = None
+
     def accept(raw, terminated):
-        nonlocal stop
+        nonlocal stop, export_block
         counts["lines_read"] += 1
         if not raw.strip():
             counts["blank_lines"] += 1
@@ -269,11 +290,16 @@ def analyze(paths, *, non_conversation=False, max_bytes=MAX_BYTES, max_events=MA
         if not terminated:
             counts["valid_json_without_final_newline"] += 1
         if event.get("schema") == "fkclaude.audit.export.v1":
+            finish_export_block()
             if any(key in event and not _integer(event[key]) for key in
                    ("retained", "max_events", "queue_dropped", "disk_errors", "memory_evicted", "invalid_history")):
                 invalid["type"] += 1
                 return
             counts["export_manifests"] += 1
+            if "retained" in event:
+                export_block = [event["retained"], 0]
+            else:
+                export_counts["manifests_without_retained"] += 1
             for key in ("queue_dropped", "disk_errors", "memory_evicted", "invalid_history"):
                 declared[key] = max(declared[key], event.get(key, 0))
             return
@@ -281,6 +307,10 @@ def analyze(paths, *, non_conversation=False, max_bytes=MAX_BYTES, max_events=MA
         if error:
             invalid[error] += 1
             return
+        # Export retained counts physical valid rows, including overlapping exports.
+        # Count before global deduplication, event budgets and the display filter.
+        if export_block is not None:
+            export_block[1] += 1
         key = (event["session_id"], event["seq"])
         digest = hashlib.sha256(json.dumps(event, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()).digest()
         if key in seen:
@@ -369,6 +399,7 @@ def analyze(paths, *, non_conversation=False, max_bytes=MAX_BYTES, max_events=MA
     for path in files:
         if stop:
             break
+        read_failed = False
         try:
             opener = gzip.open if path.name.endswith(".gz") else open
             with opener(path, "rb") as stream:
@@ -396,8 +427,11 @@ def analyze(paths, *, non_conversation=False, max_bytes=MAX_BYTES, max_events=MA
                             counts["incomplete_tail_lines"] += 1
                         continue
                     accept(raw, raw.endswith(b"\n"))
-        except (OSError, EOFError, gzip.BadGzipFile):
+        except (OSError, EOFError, gzip.BadGzipFile, zlib.error):
             counts["file_errors"] += 1
+            read_failed = True
+        finally:
+            finish_export_block(incomplete=stop or read_failed)
 
     sequence_rows, missing_count = [], 0
     for index, numbers in enumerate(sessions.values(), 1):
@@ -456,6 +490,8 @@ def analyze(paths, *, non_conversation=False, max_bytes=MAX_BYTES, max_events=MA
         "sequence": {"scope": "all_valid_unique_events_before_view_filter",
                      "sessions_tracked": len(sessions), "internal_missing_sequences": missing_count,
                      "sessions": sequence_rows, "session_rows_omitted": max(0, len(sessions) - len(sequence_rows))},
+        "export_validation": {**export_counts,
+                              "scope": "valid_physical_event_rows_before_global_deduplication_and_view_filter"},
         "recorder_counter_maxima": dict(declared),
         "endpoints": endpoint_rows,
         "endpoint_events_omitted": counts["endpoint_events_omitted"],
@@ -497,6 +533,14 @@ def human_summary(report):
             report["native_io"]["invalid_queue_drop_reports"]),
         "\u7c7b\u522b\uff1a" + "\uff0c".join("{}={}".format(key, value) for key, value in report["categories"].items()),
     ]
+    if data["export_manifests"]:
+        exports = report["export_validation"]
+        lines.insert(3,
+            "导出范围：{} 块匹配，{} 块计数不符，{} 块未读完，{} 块未声明 retained；"
+            "声明 {} 条，已读 {} 条有效事件（逐块计数，去重和筛选前）。".format(
+                exports["matched_blocks"], exports["mismatched_blocks"],
+                exports["incomplete_blocks"], exports["manifests_without_retained"],
+                exports["declared_event_rows"], exports["observed_valid_event_rows"]))
     if report["endpoints"]:
         lines.append("\u76ee\u6807\u6a21\u677f\uff08\u4e8b\u4ef6\u6570\u5305\u542b\u9636\u6bb5\u4e0e\u5c42\u7ea7\u91cd\u590d\uff09\uff1a")
         for row in report["endpoints"][:12]:

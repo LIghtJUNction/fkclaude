@@ -21,23 +21,39 @@ import java.util.Map;
 public final class MainActivity extends Activity {
     private final Map<String, Row> rows = new LinkedHashMap<>();
     private Switch enabled;
+    private Profile savedBaseline;
     private record Row(Schema.Field field, Spinner mode, EditText input) {}
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         Profile profile;
         try {
-            if (!ProfileStore.exists(this)) ProfileStore.save(this, Profile.defaults());
+            if (!ProfileStore.exists(this)) {
+                try { ProfileStore.save(this, Profile.defaults()); }
+                catch (ProfilePersistence.Conflict anotherActivityInitialized) { /* Read its winner below. */ }
+            }
             profile = ProfileStore.load(this);
         } catch (RuntimeException e) {
-            profile = new Profile(Map.of("enabled", "false"));
-            toast(R.string.load_error);
+            showLoadFailure();
+            return;
         }
-        if (state != null && state.containsKey("draft")) {
-            try { profile = Profile.parse(state.getString("draft")); }
-            catch (IllegalArgumentException ignored) { /* Retain the last valid saved profile. */ }
-        }
+        savedBaseline = profile;
+        if (state != null)
+            profile = ProfilePersistence.restoreDraft(profile, state.getString("draft_baseline"), state.getString("draft"));
         render(profile);
+    }
+
+    private void showLoadFailure() {
+        savedBaseline = null;
+        rows.clear();
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(18), dp(28), dp(18), dp(24));
+        TextView title = text(getString(R.string.app_name)); title.setTextSize(28);
+        root.addView(title);
+        root.addView(text(getString(R.string.profile_load_recovery)));
+        button(root, R.string.profile_retry, v -> recreate());
+        setContentView(root);
     }
 
     private void render(Profile profile) {
@@ -184,18 +200,28 @@ public final class MainActivity extends Activity {
     }
 
     private void save() {
+        if (savedBaseline == null) { showLoadFailure(); return; }
+        Profile saved;
+        try { saved = collect(); }
+        catch (RuntimeException invalid) { toast(R.string.invalid); return; }
         try {
-            Profile saved = collect();
-            ProfileStore.save(this, saved);
+            ProfileStore.save(this, saved, savedBaseline);
+            savedBaseline = saved;
             render(saved);
             toast(R.string.saved);
+        } catch (ProfilePersistence.Conflict changed) {
+            showLoadFailure();
+        } catch (RuntimeException failure) {
+            toast(R.string.profile_save_error);
         }
-        catch (RuntimeException e) { toast(R.string.invalid); }
     }
     @Override protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
-        try { state.putString("draft", collect().encode()); }
-        catch (RuntimeException ignored) { /* Invalid draft is not persisted. */ }
+        if (savedBaseline == null) return;
+        try {
+            state.putString("draft", collect().encode());
+            state.putString("draft_baseline", savedBaseline.encode());
+        } catch (RuntimeException ignored) { /* Invalid draft is not persisted. */ }
     }
     private void button(LinearLayout parent, int text, View.OnClickListener action) {
         Button button = new Button(this);

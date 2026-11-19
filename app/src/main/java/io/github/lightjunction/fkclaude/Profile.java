@@ -63,9 +63,15 @@ public final class Profile {
         Properties props = new Properties();
         props.putAll(values);
         StringWriter writer = new StringWriter();
-        try { props.store(writer, "fkclaude environment profile v1"); }
+        try { props.store(writer, null); }
         catch (IOException e) { throw new IllegalStateException(e); }
-        return writer.toString();
+        // Properties supplies the escaping. Remove its wall-clock comment and sort complete
+        // physical records so snapshots never carry the module process's real time zone.
+        java.util.List<String> records = new java.util.ArrayList<>();
+        for (String line : writer.toString().split("\\r?\\n"))
+            if (!line.startsWith("#") && !line.isEmpty()) records.add(line);
+        java.util.Collections.sort(records);
+        return records.isEmpty() ? "" : String.join("\n", records) + "\n";
     }
 
     public static Profile defaults() {

@@ -10,7 +10,6 @@
     <string name="saved">Saved. Fully restart Claude to apply.</string>
     <string name="edited">Changed in this form. Save to apply.</string>
     <string name="invalid">Invalid profile. Check the selected custom values.</string>
-    <string name="load_error">The saved profile is invalid. Overrides are disabled until you save a valid profile.</string>
     <string name="groups_0">Identity</string>
     <string name="groups_1">Device and OS</string>
     <string name="groups_2">Language and time zone</string>
@@ -126,4 +125,7 @@
     <string name="us_privacy_preset">Apply US privacy profile</string>
     <string name="field_privacy_us_only">US-only privacy policy</string>
     <string name="us_privacy_note">US privacy blocks device location and uses US region settings inside Claude. Internet access requires the probe to report a US exit and match the IP allowlist. This does not set up a VPN; an empty allowlist stays offline. Disable US-only policy before changing its required protections.</string>
+    <string name="profile_load_recovery">The saved configuration could not be verified. Editing is paused. Check the saved configuration and framework status, then retry.</string>
+    <string name="profile_save_error">Configuration saving or publication did not complete. Retry before starting Claude.</string>
+    <string name="profile_retry">Retry loading</string>
 </resources>

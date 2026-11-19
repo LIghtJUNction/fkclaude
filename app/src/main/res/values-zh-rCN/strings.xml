@@ -10,7 +10,6 @@
     <string name="saved">已保存，完全重启 Claude 后生效。</string>
     <string name="edited">表单已修改，保存后生效。</string>
     <string name="invalid">配置无效，请检查所选自定义值。</string>
-    <string name="load_error">已保存配置无效；保存有效配置前不会进行覆盖。</string>
     <string name="groups_0">身份标识</string>
     <string name="groups_1">设备与系统</string>
     <string name="groups_2">语言与时区</string>
@@ -126,4 +125,7 @@
     <string name="us_privacy_preset">应用美国隐私配置</string>
     <string name="field_privacy_us_only">仅美国隐私策略</string>
     <string name="us_privacy_note">美国隐私配置阻断本机定位，并在 Claude 内使用美国地区设置。联网须同时满足探测报告美国和 IP 白名单；此配置不会设置 VPN，白名单为空时保持离线。修改必需保护前，须先关闭仅美国策略。</string>
+    <string name="profile_load_recovery">无法确认已保存配置，已暂停编辑。请检查已保存配置和框架状态后重试。</string>
+    <string name="profile_save_error">配置保存或发布未完成。请重试；完成前不要启动 Claude。</string>
+    <string name="profile_retry">重新读取</string>
 </resources>

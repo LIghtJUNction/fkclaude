@@ -1,0 +1,337 @@
+{
+  "schema": "fkclaude.release.v1",
+  "version": "0.4.5",
+  "version_code": 10,
+  "date": "2026-11-20",
+  "status": "validated_offline_no_trusted_us_exit",
+  "build_type": "debug",
+  "source": {
+    "base_documentation_commit": "32587a98c7c6a8db97b1caac2db8e36d532ef1b2",
+    "apk_source_commit": "fea6b9696f547faac55805f46d122b1d0195e6c6",
+    "cpp_network_guard_changed": false,
+    "developer_checkout_matches_pushed_source": true,
+    "parent_source_commit": "c8c12cbdac015145d955697a3bc3bd991f4e4ac9",
+    "source_files_hash_verified": 24,
+    "startup_fix_files": 4
+  },
+  "apk": {
+    "file_name": "fkclaude-0.4.5.apk",
+    "bytes": 4500933,
+    "sha256": "17ed6c85553592918e2a364c4e96beaa6cd4e36baa2c1f90e5a4d26eb5f60a6d",
+    "installed_hash_verified": true,
+    "delivery_copy_verified": true,
+    "local_delivery_path": "artifacts/fkclaude-0.4.5.apk"
+  },
+  "verification": {
+    "configurable_fields": 96,
+    "profile_targeted_tests": 37,
+    "new_virtual_identity_tests": 9,
+    "virtual_identity_tests_included_in_profile_total": true,
+    "final_java_tests": 170,
+    "final_node_tests": 23,
+    "final_apk_contracts_verified": true,
+    "final_device_verified": true,
+    "java_test_components": {
+      "previous_tests": 132,
+      "new_configuration_tests": 9,
+      "new_runtime_tests": 21,
+      "startup_gate_tests": 8
+    },
+    "node_test_components": {
+      "audit": 14,
+      "environment": 9
+    },
+    "method_contracts": 8,
+    "field_contracts": 31,
+    "locales_complete": [
+      "en",
+      "zh-CN"
+    ],
+    "arm64_elf_and_zip_16k_alignment": true,
+    "apk_signature": "v2 verified",
+    "lint_errors": 0,
+    "lint_warnings": 16,
+    "lint_warning_categories": {
+      "RequiresFeature": 4,
+      "GradleDependency": 2,
+      "HardwareIds": 2,
+      "TypographyDashes": 2,
+      "AndroidGradlePluginVersion": 1,
+      "ChromeOsAbiSupport": 1,
+      "OldTargetApi": 1,
+      "RtlHardcoded": 1,
+      "SetTextI18n": 1,
+      "UseRequiresApi": 1
+    },
+    "cpp_host_regression_repeated_this_iteration": false,
+    "profile_tests_included_in_final_java_total": true
+  },
+  "virtual_identity": {
+    "scope": "target Claude process only; base fields, not full firmware or hardware authentication",
+    "manufacturer": "Google",
+    "brand": "google",
+    "model": "Pixel 8",
+    "device": "shiba",
+    "product": "shiba",
+    "sim_phone_number": "+12025550142",
+    "phone_number_reserved_fictional_nonworking": true,
+    "operator_numeric": "310260",
+    "operator_name": "T-Mobile",
+    "sim_country": "us",
+    "network_country": "us",
+    "new_schema_key": "sim_phone_number",
+    "true_cell_and_nearby_location_unavailable": true,
+    "existing_virtual_ids_and_approved_cidrs_preserved": true,
+    "real_runtime_sdk_preserved_in_strict_mode": true,
+    "strict_removes_legacy_sdk_and_raw_sdk_property": true,
+    "existing_os_release_security_patch_screen_config_preserved": true,
+    "ordinary_mode_custom_sdk_unchanged": true,
+    "nested_properties_escaped_and_without_auto_date_comment": true,
+    "physical_sim_or_subscription_modified": false,
+    "google_device_authentication_claimed": false,
+    "new_real_phone_permissions_requested": false,
+    "unverified_firmware_build_fields_return_empty": 10,
+    "additional_soc_sku_fields_return_empty": 4
+  },
+  "web_identity": {
+    "status": "local_regression_and_device_getter_validation_passed",
+    "ua_chrome_version_source": "actual WebView engine",
+    "intended_consistency_targets": [
+      "WebSettings UA",
+      "http.agent",
+      "JavaScript UA",
+      "HTTP User-Agent Client Hints metadata"
+    ],
+    "explicit_model_metadata_required": true,
+    "metadata_capability_check_required": true,
+    "null_model_means_system_default": true,
+    "full_browser_fingerprint_coverage_claimed": false,
+    "strict_metadata_or_ua_setting_failure_stops_target_process": true,
+    "startup_initialization": {
+      "early_privacy_and_network_protection_retained": true,
+      "initialization_requires_current_application_and_main_thread": true,
+      "original_ua_read_once_in_internal_scope": true,
+      "one_temporary_webview_same_thread_only": true,
+      "temporary_webview_loads_no_url": true,
+      "temporary_webview_destroyed_and_scope_revoked_in_finally": true,
+      "ready_only_after_metadata_validation": true,
+      "no_probe_or_native_permit_before_ready": true,
+      "privacy_failure_and_native_permit_share_guard_lock": true,
+      "failure_still_exits_if_native_block_throws": true,
+      "device_cold_start_verification": true
+    },
+    "metadata_fields_read_back": 9,
+    "remote_http_header_capture_performed": false,
+    "device_js_full_path_validation_claimed": false
+  },
+  "network_policy": {
+    "inherited_from": "0.4.4",
+    "trusted_us_exit_verified": false,
+    "explicit_cidr_configured": false,
+    "allowlist_empty": true,
+    "current_behavior": "blocked",
+    "always_on_vpn_configured": false,
+    "vpn_lockdown_configured": false,
+    "non_conversation_control": "display filter only",
+    "actual_blocking_layers": [
+      "adapted Sift collect/queue/dispatch",
+      "listed telemetry hosts and user rules",
+      "US/CIDR/family/lease egress guard"
+    ],
+    "full_tls_body_inspection": false,
+    "whole_device_packet_capture": false,
+    "all_sensitive_payloads_identified_guaranteed": false,
+    "zero_collection_guaranteed": false,
+    "account_suspension_prevention_guaranteed": false,
+    "online_us_positive_case_verified": false,
+    "real_exit_switch_verified": false,
+    "vpn_disconnect_verified": false
+  },
+  "cache_cleanup": {
+    "status": "complete",
+    "user_id": 0,
+    "method": "pm clear --user 0 --cache-only PACKAGE",
+    "packages_attempted": 303,
+    "packages_succeeded": 303,
+    "packages_failed": 0,
+    "packages_timed_out": 0,
+    "duration_seconds": 53.6,
+    "cache_before_bytes": 2621252608,
+    "cache_after_bytes": 5378048,
+    "cache_reduction_bytes": 2615874560,
+    "available_before_bytes": 59206746112,
+    "available_after_bytes": 61949087744,
+    "available_delta_bytes": 2742341632,
+    "available_delta_is_not_exclusively_attributed_to_cleanup": true,
+    "profile_snapshot_unchanged": true,
+    "audit_history_unchanged": true,
+    "audit_history_files": 1,
+    "private_manifest_removed": true,
+    "downloads_dcim_chat_account_data_not_targeted": true,
+    "user_installers_and_files_not_classified_as_garbage": true,
+    "evidence": "artifacts/iteration-0.4.5-2026-11-20/cache-cleanup.json",
+    "inventory_method_note": "one diskstats dump used before identifying its built-in temporary performance probe; subsequent inventory read existing metadata"
+  },
+  "evidence": {
+    "analysis": "docs/location-privacy-0.4.5-2026-11-20.md",
+    "prior_report": "docs/location-privacy-2026-11-20.md",
+    "targeted_profile_tests": "artifacts/iteration-0.4.5-2026-11-20/profile-unit/",
+    "raw_personal_data_published": false,
+    "final_build": "artifacts/iteration-0.4.5-2026-11-20/build-final-summary.json",
+    "pre_init_fix": "artifacts/iteration-0.4.5-2026-11-20/pre-init-fix/",
+    "final_device": "artifacts/iteration-0.4.5-2026-11-20/device/",
+    "final_device_files": [
+      "device-startup.json",
+      "device-restart.json",
+      "device-audit-summary.json",
+      "installed.json",
+      "device-cleanup.json",
+      "profile-and-network-final.json"
+    ],
+    "final_module_logs": [
+      "startup-module.log",
+      "restart-module.log"
+    ],
+    "release_summary": "docs/releases/0.4.5.json"
+  },
+  "network_recovery": {
+    "status": "cellular_validated_wifi_enabled_not_associated",
+    "mobile_network_validated": true,
+    "public_destination_ping_passed": true,
+    "example_com_domain_ping_passed": true,
+    "active_vpn_observed": false,
+    "wifi_was_disabled": true,
+    "wifi_enable_command_executed": true,
+    "wifi_associated_at_four_second_check": false,
+    "mobile_network_remained_validated": true,
+    "claude_stopped_during_diagnosis": true,
+    "final_network_readback": {
+      "wifi_enabled": true,
+      "wifi_associated": false,
+      "transport": "CELLULAR",
+      "internet_capability": true,
+      "validated": true,
+      "active_vpn": false,
+      "always_on_vpn": false,
+      "vpn_lockdown": false
+    },
+    "evidence": "artifacts/iteration-0.4.5-2026-11-20/network-recovery.json",
+    "raw_network_addresses_ssid_or_region_published": false,
+    "general_connectivity_available_via_cellular": true
+  },
+  "pre_initialization_fix": {
+    "source_commit": "c8c12cbdac015145d955697a3bc3bd991f4e4ac9",
+    "apk_bytes": 4484549,
+    "apk_sha256": "84e94bf9a2f584b633de708d534211ae27fc3deee47ffafc3fe80fe4cd5e869c",
+    "java_tests": 162,
+    "node_tests": 23,
+    "lint_errors": 0,
+    "lint_warnings": 16,
+    "local_build_passed": true,
+    "device_startup_passed": false,
+    "failure": "default WebView UA accessed before currentApplication existed; strict startup stopped the target",
+    "scope": "pre-fix evidence only; not final APK/device acceptance"
+  },
+  "final_test_cleanup": {
+    "status": "complete",
+    "original_audit_history_files": 1,
+    "original_audit_history_restored": true,
+    "history_content_fingerprint_equal": true,
+    "device_history_backup_removed": true,
+    "owned_resources_scope": [
+      "virtual display",
+      "JAR and helpers",
+      "private recording",
+      "private hashes",
+      "checkpoints"
+    ],
+    "owned_scrcpy_task_cancelled": true,
+    "adb_server_preserved": true,
+    "claude_stopped": true,
+    "strict_profile_retained": true,
+    "empty_allowlist_retained": true,
+    "location_permissions_and_appops_retained": true,
+    "original_virtual_ids_preserved": true,
+    "safe_screenshots": [
+      {
+        "path": "device/module-saved.jpg",
+        "scope": "0.4.5 module configuration UI after saving; UI code unchanged in final source"
+      },
+      {
+        "path": "device/audit-ui-us-pixel.jpg",
+        "scope": "final APK first cold start; visually checked to contain no real identity values"
+      }
+    ],
+    "temporary_local_items_removed": 11,
+    "owned_virtual_display_removed": true,
+    "owned_device_jar_removed": true,
+    "task_generated_device_audit_records_removed": true
+  },
+  "runtime_observations": {
+    "android_version": 16,
+    "abi": "arm64",
+    "claude_version": "1.261112.18",
+    "claude_version_code": 26111218,
+    "active_config_channel": "framework preferences",
+    "cold_starts_verified": 2,
+    "readbacks_each_start": {
+      "passed": 47,
+      "total": 47
+    },
+    "startup_sequence": [
+      "initialization hold",
+      "Web metadata fields 9",
+      "privacy startup ready",
+      "empty allowlist blocked"
+    ],
+    "initialization_failures_observed": false,
+    "installed_hook_records": 273,
+    "hook_record_scope": "all target-process installation records; not a native network hook count",
+    "native_property_environment_each_start": {
+      "framework": 1,
+      "requested": 4,
+      "installed": 4,
+      "failed": 0,
+      "accepted": 1
+    },
+    "native_network_observer_each_start": {
+      "installed": 7,
+      "requested": 7,
+      "failed": 0
+    },
+    "final_audit_sample": {
+      "valid_records": 1058,
+      "invalid_records": 0,
+      "dns_called": 37,
+      "dns_failed": 37,
+      "http_attempted": 57,
+      "http_failed": 57,
+      "native_connect_blocked": 8,
+      "positive_application_byte_observations": 0,
+      "probe_events": 0,
+      "observer_errors": 0,
+      "scope": "covered metadata observers only; no full TLS body or whole-device traffic capture"
+    },
+    "audit_ui_visually_checked": true,
+    "virtual_identity_values_preserved": true
+  },
+  "final_profile": {
+    "strict_us": true,
+    "guard_enabled": true,
+    "allowlist_empty": true,
+    "location_blocking": true,
+    "sift_blocking": true,
+    "pixel8_shiba_google_fields": true,
+    "synthetic_phone_and_operator": true,
+    "legacy_sdk_override_absent": true,
+    "static_custom_ua_absent": true,
+    "private_snapshot_checksum_valid": true,
+    "framework_semantics_equal": true,
+    "framework_trimmed_text_equal": true,
+    "automatic_date_timezone_comment_absent": true,
+    "fine_location_permission": "denied",
+    "coarse_location_permission": "denied",
+    "fine_location_appop": "ignore",
+    "coarse_location_appop": "ignore"
+  }
+}

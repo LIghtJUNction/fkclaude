@@ -49,7 +49,14 @@ public final class ProbeResponse {
         } catch (URISyntaxException e) { throw new IllegalArgumentException("Invalid URL", e); }
     }
 
+    /** Country is only populated by a strict trace response, never inferred from the IP or colo. */
+    public record Reply(String ip, String country) {}
+
     public static String read(InputStream input) throws IOException {
+        return readReply(input, false).ip();
+    }
+
+    public static Reply readReply(InputStream input, boolean requireCountry) throws IOException {
         int[] budget = {MAX_HEADERS};
         String status = line(input, budget);
         if (!status.matches("HTTP/1\\.[01] 200 [\\x20-\\x7e]*")) throw new IOException("Unexpected HTTP status");
@@ -93,7 +100,7 @@ public final class ProbeResponse {
             text = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(body.toByteArray())).toString();
         } catch (CharacterCodingException e) { throw new IOException("Invalid body encoding", e); }
-        return extract(text);
+        return extract(text, requireCountry);
     }
 
     private static Map<String, String> headers(InputStream input, int[] budget) throws IOException {
@@ -132,29 +139,40 @@ public final class ProbeResponse {
         }
     }
 
-    private static String extract(String body) throws IOException {
+    private static Reply extract(String body, boolean requireCountry) throws IOException {
         for (int i = 0; i < body.length(); i++) {
             char c = body.charAt(i);
             if ((c < 32 && c != '\r' && c != '\n' && c != '\t') || c == 127) throw new IOException("Control in body");
         }
         String trimmed = body.trim();
-        try { IpAllowlist.address(trimmed); return trimmed; }
-        catch (IllegalArgumentException ignored) { /* Try the two structured formats. */ }
+        if (!requireCountry) {
+            try { IpAllowlist.address(trimmed); return new Reply(trimmed, null); }
+            catch (IllegalArgumentException ignored) { /* Try the two structured formats. */ }
+        }
         Matcher json = Pattern.compile("\\{\\s*\"ip\"\\s*:\\s*\"([0-9a-fA-F:.]+)\"\\s*}").matcher(trimmed);
-        String ip = null;
-        if (json.matches()) ip = json.group(1);
+        String ip = null, country = null;
+        if (!requireCountry && json.matches()) ip = json.group(1);
         else {
             for (String line : body.split("\\r?\\n", -1)) {
                 if (line.isEmpty()) continue;
                 // A trace consists solely of key=value lines; HTML and partial matches fail.
                 if (!line.matches("[A-Za-z0-9_]+=[\\x20-\\x7e]*")) throw new IOException("Invalid trace");
-                if (line.startsWith("ip=")) {
+                int equals = line.indexOf('=');
+                String key = line.substring(0, equals);
+                if (requireCountry && (key.equalsIgnoreCase("ip") || key.equalsIgnoreCase("loc"))
+                        && !key.equals(key.toLowerCase(Locale.ROOT))) throw new IOException("Ambiguous trace field");
+                if ("ip".equals(key)) {
                     if (ip != null) throw new IOException("Duplicate IP");
-                    ip = line.substring(3);
+                    ip = line.substring(equals + 1);
+                } else if (requireCountry && "loc".equals(key)) {
+                    if (country != null) throw new IOException("Duplicate country");
+                    country = line.substring(equals + 1);
+                    if (!country.matches("[A-Z]{2}")) throw new IOException("Invalid country");
                 }
             }
         }
-        try { IpAllowlist.address(ip); return ip; }
+        if (requireCountry && country == null) throw new IOException("Missing country");
+        try { IpAllowlist.address(ip); return new Reply(ip, country); }
         catch (IllegalArgumentException e) { throw new IOException("Missing or invalid IP", e); }
     }
 }

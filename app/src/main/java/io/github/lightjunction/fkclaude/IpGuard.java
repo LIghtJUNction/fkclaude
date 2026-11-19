@@ -29,6 +29,7 @@ final class IpGuard {
     private final Object lock = new Object();
     private final ConnectivityManager connectivity;
     private final IpAllowlist allowlist;
+    private final boolean usOnly;
     private final URI endpoint;
     private final int interval;
     private final int leaseMillis;
@@ -46,6 +47,7 @@ final class IpGuard {
         connectivity = context.getSystemService(ConnectivityManager.class);
         if (connectivity == null) throw new IllegalStateException("Network state unavailable");
         allowlist = new IpAllowlist(profile.get("ip_guard_cidrs", ""));
+        usOnly = profile.flag("privacy_us_only");
         endpoint = ProbeResponse.endpoint(profile.get("ip_guard_probe_url", IpGuardDefaults.PROBE));
         interval = (int) Long.parseLong(profile.get("ip_guard_interval", "3"));
         leaseMillis = Math.min(10000, interval * 2000 + 4000);
@@ -62,7 +64,7 @@ final class IpGuard {
     // The caller runs under Claude's UID; its permission is checked by the constructor above.
     @android.annotation.SuppressLint("MissingPermission")
     static synchronized void install(Context context, Profile profile) {
-        if (!profile.flag("ip_guard_enabled") || instance != null) return;
+        if ((!profile.flag("ip_guard_enabled") && !profile.flag("privacy_us_only")) || instance != null) return;
         try {
             IpGuard guard = new IpGuard(context, profile);
             System.loadLibrary("fkclaude");
@@ -76,7 +78,8 @@ final class IpGuard {
                 @Override public void onLinkPropertiesChanged(Network network, LinkProperties properties) { guard.invalidate(); }
             });
             guard.executor.scheduleWithFixedDelay(guard::requestCheck, 0, guard.interval, TimeUnit.SECONDS);
-            XposedBridge.log("fkclaude: IP guard enabled; initially blocked; allowlist empty=" + guard.allowlist.isEmpty());
+            XposedBridge.log("fkclaude: IP guard enabled; initially blocked; allowlist empty=" + guard.allowlist.isEmpty()
+                    + "; strict US=" + guard.usOnly);
         } catch (Throwable error) {
             // An explicitly enabled guard must never silently degrade into an unguarded app.
             XposedBridge.log("fkclaude: IP guard cannot enforce; terminating target (" + error.getClass().getSimpleName() + ")");
@@ -136,15 +139,17 @@ final class IpGuard {
                 epoch = generation;
             }
             if (network == 0) { report("blocked: no network"); return; }
+            String[] decisions = {"pending", "pending"};
             for (int family : new int[]{4, 6}) {
                 boolean allowed = false;
+                EgressPolicy.Decision decision = EgressPolicy.Decision.PROBE_FAILED;
                 Observation observation = null;
                 try {
                     PROBE.set(true); nativeProbe(true);
                     observation = probe(endpoint, family);
-                    String ip = observation.ip();
-                    if (IpAllowlist.address(ip).length != (family == 4 ? 4 : 16)) throw new IOException("Probe family mismatch");
-                    allowed = allowlist.matches(ip);
+                    decision = EgressPolicy.evaluate(allowlist, observation.reply(), family, usOnly,
+                            SystemClock.elapsedRealtime(), observation.deadline());
+                    allowed = decision.allowed();
                 } catch (Exception error) { /* Timeout, TLS, framing or unknown IP means deny, never last-known allow. */ }
                 finally { nativeProbe(false); PROBE.remove(); }
                 synchronized (lock) {
@@ -155,10 +160,14 @@ final class IpGuard {
                     long until = nativePermit(family, allowed ? leaseMillis : 0,
                             observation == null ? 0 : observation.deadline());
                     if (family == 4) ipv4Until = until; else ipv6Until = until;
+                    decisions[family == 4 ? 0 : 1] = allowed && until == 0
+                            ? EgressPolicy.Decision.NATIVE_REJECTED.code() : decision.code();
                 }
             }
             report("IPv4=" + (ipv4Until > SystemClock.elapsedRealtime() ? "allowed" : "blocked")
-                    + " IPv6=" + (ipv6Until > SystemClock.elapsedRealtime() ? "allowed" : "blocked"));
+                    + " reason=" + decisions[0]
+                    + " IPv6=" + (ipv6Until > SystemClock.elapsedRealtime() ? "allowed" : "blocked")
+                    + " reason=" + decisions[1]);
         } catch (Throwable error) {
             synchronized (lock) { ipv4Until = ipv6Until = 0; nativeBlock(); }
             report("blocked: verification unavailable (" + error.getClass().getSimpleName() + ")");
@@ -174,7 +183,7 @@ final class IpGuard {
         if (!state.equals(lastStatus)) { lastStatus = state; XposedBridge.log("fkclaude: IP guard " + state); }
     }
 
-    private record Observation(String ip, long deadline) {}
+    private record Observation(ProbeResponse.Reply reply, long deadline) {}
 
     private Observation probe(URI endpoint, int family) throws IOException {
         for (String key : new String[]{"http.proxyHost", "https.proxyHost", "socksProxyHost", "proxyHost"}) {
@@ -191,15 +200,15 @@ final class IpGuard {
                 try { plain.close(); } catch (IOException ignored) {}
             }, 5, TimeUnit.SECONDS);
             try {
-                String ip = exchange(plain, endpoint, family, expired);
+                ProbeResponse.Reply reply = exchange(plain, endpoint, family, expired);
                 if (expired.get() || SystemClock.elapsedRealtime() >= validBefore) throw new java.net.SocketTimeoutException();
-                return new Observation(ip, validBefore);
+                return new Observation(reply, validBefore);
             }
             finally { deadline.cancel(false); }
         }
     }
 
-    private String exchange(Socket plain, URI endpoint, int family, AtomicBoolean expired) throws IOException {
+    private ProbeResponse.Reply exchange(Socket plain, URI endpoint, int family, AtomicBoolean expired) throws IOException {
         InetAddress chosen = null;
         for (InetAddress address : InetAddress.getAllByName(endpoint.getHost()))
             if (address.getAddress().length == (family == 4 ? 4 : 16)) { chosen = address; break; }
@@ -221,7 +230,7 @@ final class IpGuard {
                     + "\r\nAccept: text/plain\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n";
             tls.getOutputStream().write(request.getBytes(StandardCharsets.US_ASCII));
             tls.getOutputStream().flush();
-            return ProbeResponse.read(tls.getInputStream());
+            return ProbeResponse.readReply(tls.getInputStream(), usOnly);
         }
     }
 

@@ -1,0 +1,350 @@
+{
+  "schema": "fkclaude.release.v1",
+  "version": "0.4.4",
+  "version_code": 9,
+  "date": "2026-11-20",
+  "build_type": "debug",
+  "status": "validated_offline_no_trusted_us_exit",
+  "apk": {
+    "file_name": "fkclaude-0.4.4.apk",
+    "bytes": 4466009,
+    "sha256": "76f51a58d10383ba2b9507a3545bbf4c9f60c798f6302345d65f9267816b2446",
+    "installed_on_test_device_and_hash_verified": true,
+    "local_delivery_path": "artifacts/fkclaude-0.4.4.apk",
+    "delivery_copy_verified": true
+  },
+  "source": {
+    "base_commit": "be62a4cb2b03090553f2312e74c84dd8ac860976",
+    "network_guard_commit": "17f3772541a0191b445575c7b75bf0e9a0956a38",
+    "native_guard_commit": "2cd1b9364f9bf7f56f6082b32f0e322d3626ff07",
+    "android_code_commit": "80c7b0ac660b259908b940e1cb292b59385df66d",
+    "shared_native_audit_commit": "4e73ea475b55603b8b60b34269cc229d23bc23b5",
+    "configuration_reliability_commit": "736b234b3f1433bcde2926c6cb3bcb1f46a08999",
+    "apk_source_commit": "736b234b3f1433bcde2926c6cb3bcb1f46a08999"
+  },
+  "verification": {
+    "java_tests": 132,
+    "java_failures": 0,
+    "java_errors": 0,
+    "java_skipped": 0,
+    "node_tests": 22,
+    "network_java_targeted_tests": 25,
+    "network_java_targeted_tests_included_in_java_total": true,
+    "python_cli_executed": false,
+    "python_cli_prior_report": "docs/validation-0.4.3.md",
+    "lint_errors": 0,
+    "lint_warnings": 10,
+    "dex_method_contracts": 8,
+    "dex_field_contracts": 31,
+    "configurable_fields": 95,
+    "locales_complete": [
+      "en",
+      "zh-CN"
+    ],
+    "native_16k_alignment": true,
+    "apk_signature": "v2 verified",
+    "native_host_regression": {
+      "real_loopback_socket_wrappers": true,
+      "asan_ubsan_passed": true,
+      "new_write_entry_categories": 5,
+      "probe_descriptor_identity_regression": true,
+      "real_inline_patch_executed": false,
+      "new_write_entries": [
+        "write",
+        "writev",
+        "sendfile",
+        "sendfile64",
+        "splice"
+      ],
+      "shared_audit_exact_once_write_writev": true,
+      "audit_pause_keeps_guard_active": true,
+      "invalid_payload_pointer_not_dereferenced": true,
+      "local_file_pipe_unix_no_network_events": true,
+      "shared_mode_duplicate_resolve_or_patch_calls": 0
+    },
+    "ndk_arm64_api28_syntax_check": true,
+    "native_required_symbols": 11,
+    "native_symbol_count_is_distinct_patch_count": false,
+    "configuration_reliability_tests": 24,
+    "configuration_reliability_tests_included_in_java_total": true,
+    "node_scripts_unchanged_after_test": true,
+    "native_shared_observation_entries": 7,
+    "sendfile_splice_new_audit_schema": false
+  },
+  "privacy_policy": {
+    "explicit_opt_in": true,
+    "strict_enabled_on_test_device": true,
+    "device_location_blocked": true,
+    "locale": "en-US",
+    "timezone": "America/New_York",
+    "sim_country": "us",
+    "network_country": "us",
+    "guard_enabled": true,
+    "allowlist_empty": true,
+    "empty_allowlist_blocks_without_probe": true,
+    "probe_url": "https://www.cloudflare.com/cdn-cgi/trace",
+    "required_probe_country": "US",
+    "unique_country_required": true,
+    "explicit_cidr_required": true,
+    "address_family_match_required": true,
+    "lease_and_network_generation_checked": true,
+    "virtual_identity_preserved": true,
+    "unique_ip_required": true
+  },
+  "runtime_observations": {
+    "android_version": 16,
+    "abi": "arm64",
+    "claude_version": "1.261112.18",
+    "claude_version_code": 26111218,
+    "build_source_commit": "736b234b3f1433bcde2926c6cb3bcb1f46a08999",
+    "config_applied_and_saved_via_module_ui": true,
+    "active_config_channel": "framework preferences",
+    "cold_starts_verified": 2,
+    "first_start_readbacks": {
+      "passed": 15,
+      "total": 15
+    },
+    "second_start_readbacks": {
+      "passed": 15,
+      "total": 15
+    },
+    "installed_hook_count": 208,
+    "hook_count_scope": "all target-process hook installation records; not a native network hook count",
+    "initialization_failures_observed": false,
+    "strict_empty_allowlist_blocked_in_both_starts": true,
+    "audit_panel_visually_checked": true,
+    "native_observer_installed": "complete_for_requested_seven_entries",
+    "native_observer_each_start": {
+      "installed": 7,
+      "requested": 7,
+      "failed": 0
+    },
+    "optional_platform_hooks_unavailable": [
+      "SubscriptionManager#getActiveSubscriptionInfoForIccIndex"
+    ],
+    "stable_window_audit": {
+      "events": 971,
+      "invalid_records": 0,
+      "dns_called": 47,
+      "dns_failed": 47,
+      "http_attempted": 33,
+      "http_failed": 33,
+      "native_connect_blocked": 6,
+      "positive_application_byte_observations": 0,
+      "probe_events": 0,
+      "scope": "sanitized audit sample from installed observers; no system-wide packet capture"
+    }
+  },
+  "device_permissions": {
+    "fine_location_denied": true,
+    "coarse_location_denied": true,
+    "fine_location_appop": "ignore",
+    "coarse_location_appop": "ignore",
+    "permissions_not_declared": [
+      "background_location",
+      "nearby_wifi_devices",
+      "bluetooth",
+      "phone",
+      "media_location"
+    ]
+  },
+  "network_conditions": {
+    "trusted_us_exit_verified": false,
+    "always_on_vpn_configured": false,
+    "vpn_lockdown_configured": false,
+    "allowlist_empty": true,
+    "current_policy_behavior": "offline"
+  },
+  "validation_boundaries": {
+    "device_scope": "one Android 16 / arm64 device",
+    "readbacks": "runtime diagnostic values, not exhaustive API/callback path tests",
+    "observer_scope": "seven requested native observation entries installed; no whole-device packet capture or proof of all network paths",
+    "online_us_exit_allow": "not tested; no explicitly approved trusted US exit",
+    "real_exit_switch": "not tested",
+    "vpn_disconnect_lockdown": "not tested; system lockdown not configured",
+    "host_native_inline_patch": "not executed on host",
+    "server_account_and_content_location": "outside process-hook scope",
+    "snapshot_fault_injection": "module UI corruption refusal and recovery tested; Claude remained stopped; target runtime corruption and bridge outage were not separately injected on device",
+    "full_payload_classification": "not implemented by metadata auditing; complete TLS bodies are not inspected",
+    "account_enforcement": "no guarantee that server-side account restrictions are prevented"
+  },
+  "cleanup": {
+    "status": "complete",
+    "original_audit_history_restored": true,
+    "original_history_files": 1,
+    "content_fingerprint_matched": true,
+    "test_records_removed": true,
+    "history_checkpoint_removed": true,
+    "snapshot_fault_backup_removed": true,
+    "temporary_virtual_identity_hash_removed": true,
+    "temporary_recording_removed": true,
+    "adb_wrapper_removed": true,
+    "helper_jars_removed": true,
+    "virtual_display_removed": true,
+    "adb_server_preserved": true,
+    "claude_stopped": true,
+    "strict_us_profile_retained": true,
+    "guard_enabled_retained": true,
+    "empty_allowlist_retained": true,
+    "denied_location_permissions_retained": true,
+    "location_appops_ignore_retained": true,
+    "virtual_identity_unchanged": true,
+    "safe_screenshots_retained": [
+      "snapshot-rejected.jpg",
+      "audit-ui-us-mode.jpg"
+    ],
+    "scope": "final build 736b234; completed after device startup, audit and snapshot fault-injection verification"
+  },
+  "evidence": {
+    "analysis": "docs/location-privacy-2026-11-20.md",
+    "ip_guard": "docs/ip-guard.md",
+    "local_evidence_directory": "artifacts/iteration-0.4.4-2026-11-20/",
+    "raw_apks_logs_device_serials_ips_accounts_committed": false,
+    "final_device_directory": "artifacts/iteration-0.4.4-2026-11-20/final-device/",
+    "final_device_json": [
+      "installed.json",
+      "snapshot-fault.json",
+      "device-startup.json",
+      "device-restart.json",
+      "device-audit-summary.json",
+      "device-cleanup.json"
+    ],
+    "safe_screenshots": [
+      "snapshot-rejected.jpg",
+      "audit-ui-us-mode.jpg"
+    ],
+    "artifacts_bound_to_source_commit": "736b234b3f1433bcde2926c6cb3bcb1f46a08999"
+  },
+  "configuration_reliability": {
+    "status": "source_tests_and_device_ui_fault_injection_verified",
+    "source_commit": "736b234b3f1433bcde2926c6cb3bcb1f46a08999",
+    "prior_finding": "legacy fallback, failed bridge publication and stale Activity saves could weaken an enabled policy",
+    "prior_downgrade_observed_on_device": false,
+    "authoritative_private_atomic_snapshot": true,
+    "legacy_cannot_override_authoritative_snapshot": true,
+    "stale_saved_state_and_activity_save_rejected": true,
+    "baseline_comparison_and_same_payload_retry": true,
+    "load_or_publication_failure_is_explicit": true,
+    "reliable_framework_bridge_required": true,
+    "bridge_unavailable_behavior": "pause editing or report publication failure; Provider-only availability is not success",
+    "properties_auto_date_timezone_comment_removed": true,
+    "deterministic_escaping_and_cross_timezone_tests": true,
+    "checksum_algorithm": "SHA-256",
+    "checksum_scope": "accidental corruption detection only; not authentication against a malicious writer with the same UID",
+    "device_snapshot_length_and_digest_verified": true,
+    "snapshot_matches_framework_profile_semantics": true,
+    "xml_outer_whitespace_may_differ": true,
+    "timestamp_comment_absent_on_device": true,
+    "device_fault_injection": {
+      "snapshot_temporarily_corrupted": true,
+      "editing_paused": true,
+      "reread_action_visible": true,
+      "save_and_preset_actions_absent": true,
+      "claude_stopped_throughout": true,
+      "original_snapshot_restored": true,
+      "restored_content_owner_mode_verified": true,
+      "private_fault_backup_deleted": true,
+      "reread_restored_normal_ui": true,
+      "save_success_toast_observed": true,
+      "strict_guard_empty_allowlist_and_virtual_identity_retained": true
+    }
+  },
+  "pre_fix_validation": {
+    "build_source_commit": "80c7b0ac660b259908b940e1cb292b59385df66d",
+    "apk_sha256": "f49750d87de62a07548af09517a55c526bd31924cb5eb4c2ed9bcaa8247e5d0f",
+    "apk_bytes": 4447665,
+    "scope": "pre-fix build only; not final APK evidence",
+    "runtime_observations": {
+      "android_version": 16,
+      "claude_version": "1.261112.18",
+      "claude_version_code": 26111218,
+      "config_applied_and_saved_via_module_ui": true,
+      "active_config_channel": "framework preferences",
+      "cold_starts_verified": 2,
+      "first_start_readbacks": {
+        "passed": 15,
+        "total": 15
+      },
+      "second_start_readbacks": {
+        "passed": 15,
+        "total": 15
+      },
+      "first_start_installed_hook_count": 208,
+      "hook_count_scope": "all target-process hook installation records; not a native network hook count",
+      "initialization_failures_observed": false,
+      "strict_empty_allowlist_blocked_in_both_starts": true,
+      "audit_panel_visually_checked": true,
+      "native_observer_installed": "partial",
+      "optional_platform_hooks_unavailable": [
+        "SubscriptionManager#getActiveSubscriptionInfoForIccIndex"
+      ],
+      "first_session_audit": {
+        "events": 593,
+        "dns_called": 32,
+        "dns_failed": 32,
+        "http_attempted": 17,
+        "http_failed": 17,
+        "native_connect_blocked": 6,
+        "positive_application_byte_observations": 0,
+        "probe_events": 0,
+        "scope": "sanitized audit sample from installed observers; no system-wide packet capture"
+      },
+      "abi": "arm64"
+    },
+    "cleanup": {
+      "original_audit_history_restored": true,
+      "original_history_files": 1,
+      "content_fingerprint_matched": true,
+      "test_records_removed": true,
+      "history_checkpoint_removed": true,
+      "temporary_virtual_identity_hash_removed": true,
+      "temporary_recording_removed": true,
+      "adb_wrapper_removed": true,
+      "helper_jars_removed": true,
+      "virtual_display_removed": true,
+      "adb_server_preserved": true,
+      "claude_stopped": true,
+      "strict_us_profile_retained": true,
+      "denied_location_permissions_retained": true,
+      "virtual_identity_unchanged": true,
+      "safe_screenshot_retained": true,
+      "scope": "completed for the pre-fix build only"
+    },
+    "native_partial_cause": "write/writev were installed by both guard and audit",
+    "native_partial_fixed_in_commit": "4e73ea475b55603b8b60b34269cc229d23bc23b5"
+  },
+  "network_audit_policy": {
+    "non_conversation_control": "display filter only via onlyNonConversation and AuditLog.snapshot; not a blocking control",
+    "metadata_only": true,
+    "metadata_scope": [
+      "destination",
+      "request_path",
+      "result",
+      "duration",
+      "observable_byte_counts"
+    ],
+    "full_tls_body_inspected": false,
+    "account_suspension_prevention_guaranteed": false,
+    "actual_blocking": {
+      "sift": "strict policy forces block_sift at adapted collect, queue and dispatch entries",
+      "telemetry_dns": "required TELEMETRY_HOSTS merged with user blocked_hosts; listed Sentry, Datadog and Firebase hosts are refused on covered DNS paths",
+      "network_guard": "US probe, explicit CIDR, address family, generation and valid lease; current empty allowlist refuses covered traffic"
+    },
+    "boundaries": [
+      "telemetry within the same API domain",
+      "uncovered native direct connections",
+      "direct syscalls",
+      "unknown SDKs or target versions",
+      "server account history"
+    ],
+    "prerequisites_before_online_use": [
+      "trusted fixed US exit and explicit CIDR",
+      "necessary request-chain verification",
+      "telemetry rejection and applicable system-routing checks"
+    ],
+    "temporarily_allowed_for_demonstration": false,
+    "raw_packets_or_request_bodies_uploaded": false,
+    "report_scope": "sanitized metadata and aggregate counts only",
+    "all_sensitive_payloads_identified_or_filtered_guaranteed": false
+  }
+}

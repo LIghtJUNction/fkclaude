@@ -60,6 +60,64 @@ class AuditLogAnalysisTest(unittest.TestCase):
         self.assertEqual({"json": 1, "schema": 1, "type": 1}, report["invalid"])
         self.assertFalse(report["complete_input"])
 
+    def test_camera_and_microphone_are_local_categories_in_every_view(self):
+        path = self.write("media.ndjson", [
+            event(1, category="camera", action="api_access", outcome="called"),
+            event(2, category="microphone", action="api_access", outcome="called"),
+            event(3),
+        ])
+        all_events = audit.analyze([path])
+        self.assertEqual({"camera": 1, "microphone": 1, "network": 1}, all_events["categories"])
+        self.assertEqual(0, all_events["unrecognized"]["category_events"])
+        self.assertEqual(3, all_events["input"]["selected_events"])
+        network = audit.analyze([path], non_conversation=True)
+        self.assertEqual({"network": 1}, network["categories"])
+        self.assertEqual(1, network["input"]["selected_events"])
+        self.assertEqual(2, network["input"]["filtered_events"])
+        self.assertEqual({"attempted": 1}, network["network_phase_events"])
+        self.assertEqual(0, network["unrecognized"]["category_events"])
+
+    def test_redacted_dns_templates_survive_export_analysis(self):
+        template = ":id.datadog.pool.ntp.org"
+        for hostname in (template, "api.:id.example.com", ":id.:id.example.com"):
+            with self.subTest(hostname=hostname):
+                self.assertEqual(hostname, audit._host(hostname))
+                self.assertEqual(hostname, audit._host(audit._host(hostname)))
+        self.assertEqual(template, audit._host(":ID.DATADOG.POOL.NTP.ORG."))
+        path = self.write("hosts.ndjson", [
+            event(1, details={"host": template, "path": "/api/v2/rum", "method": "POST"}),
+            event(2, details={"url": "https://" + template + ":443/api/v2/rum",
+                              "method": "POST"}),
+            event(3, details={"url": "https://PRIVATE-USER:PRIVATE-PASSWORD@api.:id.example.com"
+                              ":443/api/v2/rum?q=PRIVATE-QUERY#PRIVATE-FRAGMENT",
+                              "method": "POST"}),
+        ])
+        report = audit.analyze([path])
+        self.assertTrue(report["complete_input"])
+        by_endpoint = {row["endpoint"]: row for row in report["endpoints"]}
+        self.assertEqual(2, by_endpoint["POST " + template + " /api/v2/rum"]["observation_events"])
+        self.assertIn("POST api.:id.example.com /api/v2/rum", by_endpoint)
+        self.assertNotIn("PRIVATE-", json.dumps(report))
+
+    def test_ip_and_unrecognized_colon_hosts_still_redact(self):
+        for host in ("192.0.2.1", "2001:db8::1", "[2001:db8::1]", "::1",
+                     "private:secret.example.com", ":private.example.com",
+                     ":id:secret.example.com", "api.example.com:secret", "[ip]"):
+            with self.subTest(host=host):
+                self.assertEqual("[ip]", audit._host(host))
+        for host in (":id..example.com", ":id.example.com/private", ":id.@example.com"):
+            with self.subTest(invalid_host=host):
+                self.assertEqual("[unknown]", audit._host(host))
+        path = self.write("ip.ndjson", [
+            event(1, details={"url": "https://192.0.2.1:443/api"}),
+            event(2, details={"url": "https://[2001:db8::1]:443/api"}),
+        ])
+        report = audit.analyze([path])
+        self.assertEqual("UNKNOWN [ip] /api", report["endpoints"][0]["endpoint"])
+        self.assertEqual(2, report["endpoints"][0]["observation_events"])
+        self.assertNotIn("192.0.2.1", json.dumps(report))
+        self.assertNotIn("2001:db8", json.dumps(report))
+
     def test_network_stages_and_native_returns_are_separate_measurements(self):
         http = {"request_id": "r1", "method": "POST", "host": "claude.ai",
                 "path": "/event_logging/v2/batch", "transport": "okhttp"}

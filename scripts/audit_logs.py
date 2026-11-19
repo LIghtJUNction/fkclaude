@@ -23,7 +23,7 @@ MAX_ENDPOINTS = 128
 MAX_GROUPS = 100_000
 CATEGORIES = frozenset(("system", "network", "conversation", "telemetry", "device", "identifier",
                        "location", "clipboard", "contacts", "calendar", "packages", "sensor",
-                       "webview", "integrity", "unknown"))
+                       "microphone", "camera", "webview", "integrity", "unknown"))
 NETWORK = frozenset(("network", "telemetry", "integrity", "webview", "unknown"))
 OUTCOMES = frozenset(("attempted", "blocked", "response_received", "returned", "failed", "called",
                      "constructed", "observed", "installed", "unavailable", "unsupported",
@@ -111,15 +111,16 @@ def _host(value):
     if not isinstance(value, str) or len(value) > 253:
         return "[unknown]"
     value = value.lower().rstrip(".")
-    if re.fullmatch(r"[0-9.]+", value) or ":" in value:
+    host_labels = value.split(".")
+    # Android replaces identifier-bearing DNS labels with the exact :id token.
+    # Preserve that template when re-sanitizing exports; other colons still hide IPs.
+    if re.fullmatch(r"[0-9.]+", value) or any(":" in label and label != ":id" for label in host_labels):
         return "[ip]"
-    if not re.fullmatch(r"[a-z0-9.-]+", value):
-        return "[unknown]"
     labels = []
-    for label in value.split("."):
-        if not label:
+    for label in host_labels:
+        if label != ":id" and not re.fullmatch(r"[a-z0-9-]+", label):
             return "[unknown]"
-        labels.append(":id" if len(label) > 31 or label.isdigit()
+        labels.append(":id" if label == ":id" or len(label) > 31 or label.isdigit()
                       or re.search(r"[0-9a-f]{16,}", label)
                       or re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", label)
                       else label)
@@ -152,7 +153,11 @@ def _endpoint(details):
         try:
             url = urlsplit(details["url"])
             if url.scheme in ("http", "https", "ws", "wss"):
-                host, path = url.hostname, url.path
+                # A redacted :id label is not valid for url.hostname (it looks like
+                # a port separator). Strip credentials and a numeric port explicitly,
+                # then let _host validate the complete DNS template or redact an IP.
+                host = re.sub(r":[0-9]+$", "", url.netloc.rsplit("@", 1)[-1])
+                path = url.path
         except ValueError:
             pass
     if host is None and path is None:

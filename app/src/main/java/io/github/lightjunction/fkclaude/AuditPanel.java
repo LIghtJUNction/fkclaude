@@ -2,6 +2,7 @@ package io.github.lightjunction.fkclaude;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.ActivityOptions;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.Context;
@@ -14,10 +15,12 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.view.Display;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -67,7 +70,15 @@ final class AuditPanel {
                 thread.setDaemon(true);
                 return thread;
             }, new ThreadPoolExecutor.AbortPolicy());
-    private static boolean exportRequested;
+    private static final String EXPORT_STATE = "fkclaude.audit.pendingExport";
+    private static final AuditExportRequests<Activity> EXPORTS = new AuditExportRequests<>();
+    // A document provider can be slow; it must not occupy the list/clear worker.
+    private static final ThreadPoolExecutor EXPORT_WORKER = new ThreadPoolExecutor(1, 1, 0,
+            TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1), runnable -> {
+                Thread thread = new Thread(runnable, "fkclaude-audit-export");
+                thread.setDaemon(true);
+                return thread;
+            }, new ThreadPoolExecutor.AbortPolicy());
     private static final String[] CATEGORIES = {"", "network", "telemetry", "conversation", "device",
             "identifier", "location", "clipboard", "contacts", "calendar", "packages", "sensor",
             "microphone", "camera", "webview", "integrity", "system"};
@@ -161,6 +172,7 @@ final class AuditPanel {
             MAIN.post(() -> detach(activity));
             return;
         }
+        EXPORTS.release(activity);
         WeakReference<AuditPanel> reference = PANELS.remove(activity);
         AuditPanel panel = reference == null ? null : reference.get();
         if (panel == null) return;
@@ -174,37 +186,73 @@ final class AuditPanel {
         if (panel.bubble.getParent() instanceof ViewGroup parent) parent.removeView(panel.bubble);
     }
 
-    /** Return true only for the document picker explicitly launched by this panel. */
+    static void saveExportState(Activity activity, Bundle state) {
+        state.remove(EXPORT_STATE);
+        AuditExportRequests.Request request = EXPORTS.pending(activity);
+        if (request == null || activity.isFinishing()) return;
+        Bundle pending = new Bundle();
+        pending.putString("token", request.token());
+        pending.putInt("requestCode", request.requestCode());
+        state.putBundle(EXPORT_STATE, pending);
+    }
+
+    /** Restore before result delivery, including the first Activity in a new process. */
+    static boolean restoreExportState(Activity activity, Bundle state) {
+        if (state == null) return false;
+        Bundle pending = state.getBundle(EXPORT_STATE);
+        if (pending == null || pending.getInt("requestCode", -1) != REQUEST_EXPORT) return false;
+        return EXPORTS.restore(activity, pending.getString("token"), REQUEST_EXPORT);
+    }
+
+    /** Return true only for a single result owned by this exact Activity instance. */
     static boolean onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
-        if (requestCode != REQUEST_EXPORT || !exportRequested) return false;
-        exportRequested = false;
+        if (!EXPORTS.consume(activity, requestCode)) return false;
+        if (activity.isFinishing() || activity.isDestroyed()) return true;
         if (resultCode != Activity.RESULT_OK || data == null || data.getData() == null) return true;
         Uri uri = data.getData();
         if (!"content".equals(uri.getScheme())) {
             toast(activity, "未写入：请选择系统文件保存位置");
             return true;
         }
-        Context context = activity.getApplicationContext();
+        Context application = activity.getApplicationContext();
+        Context context = application == null ? activity : application;
         WeakReference<Activity> weak = new WeakReference<>(activity);
-        submit(() -> {
-            boolean success = false;
-            try {
-                try (OutputStream output = context.getContentResolver().openOutputStream(uri, "wt")) {
-                    if (output == null) throw new java.io.IOException("Document stream unavailable");
-                    output.write(AuditLog.exportJsonl().getBytes(StandardCharsets.UTF_8));
-                    output.flush();
+        try {
+            EXPORT_WORKER.execute(() -> {
+                String message;
+                try {
+                    // Recreated callers may receive the picker result before history restoration ends.
+                    // Wait off the main thread, and never open/truncate a destination until bytes exist.
+                    if (!AuditLog.awaitHistoryLoaded(5000)) {
+                        message = "历史记录仍在载入，请稍后重新导出";
+                    } else {
+                        byte[] bytes = AuditLog.exportSnapshot().toJsonl().getBytes(StandardCharsets.UTF_8);
+                        try (OutputStream output = context.getContentResolver().openOutputStream(uri, "wt")) {
+                            if (output == null) throw new java.io.IOException("Document stream unavailable");
+                            output.write(bytes);
+                            output.flush();
+                        }
+                        message = "已导出脱敏 JSONL";
+                    }
+                } catch (AuditExportSnapshot.HistoryNotReadyException loading) {
+                    message = "历史记录仍在载入，请稍后重新导出";
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    message = "导出已中断，请重试";
+                } catch (Exception ignored) {
+                    // Never expose provider paths, document names or exception messages in logs.
+                    message = "导出失败，请重新选择保存位置";
                 }
-                success = true;
-            } catch (Exception ignored) {
-                // Never expose provider paths, document names or exception messages in logs.
-            }
-            final boolean saved = success;
-            MAIN.post(() -> {
-                Activity target = weak.get();
-                if (target != null && !target.isDestroyed())
-                    toast(target, saved ? "已导出脱敏 JSONL" : "导出失败，请重新选择保存位置");
+                String result = message;
+                MAIN.post(() -> {
+                    Activity target = weak.get();
+                    if (target != null && !target.isFinishing() && !target.isDestroyed()) toast(target, result);
+                });
             });
-        }, activity);
+            toast(activity, "正在准备导出…");
+        } catch (RejectedExecutionException busy) {
+            toast(activity, "已有导出正在处理，请稍后重试");
+        }
         return true;
     }
 
@@ -669,17 +717,22 @@ final class AuditPanel {
     @SuppressWarnings("deprecation")
     private void chooseExport() {
         Activity activity = owner.get();
-        if (activity == null || disposed) return;
-        if (exportRequested) { toast(activity, "请先完成当前保存操作"); return; }
+        if (activity == null || disposed || activity.isFinishing() || activity.isDestroyed()) return;
+        AuditExportRequests.Request request = EXPORTS.begin(activity, REQUEST_EXPORT);
+        if (request == null) { toast(activity, "请先完成当前保存操作"); return; }
         Intent picker = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
                 .setType("application/x-ndjson");
         picker.putExtra(Intent.EXTRA_TITLE, "fkclaude-audit-"
                 + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(new java.util.Date()) + ".jsonl");
-        exportRequested = true;
-        try { activity.startActivityForResult(picker, REQUEST_EXPORT); }
-        catch (RuntimeException ignored) {
-            exportRequested = false;
-            toast(activity, "无法打开系统文件选择器");
+        try {
+            ActivityOptions options = ActivityOptions.makeBasic();
+            Display display = activity.getDisplay();
+            // Best effort: OEM document pickers can still forward to another display.
+            if (display != null && display.isValid()) options.setLaunchDisplayId(display.getDisplayId());
+            activity.startActivityForResult(picker, request.requestCode(), options.toBundle());
+        } catch (RuntimeException ignored) {
+            EXPORTS.release(activity);
+            toast(activity, "无法打开系统文件选择器，请重试");
         }
     }
 

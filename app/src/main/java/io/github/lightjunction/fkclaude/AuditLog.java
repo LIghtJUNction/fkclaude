@@ -22,6 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -39,6 +40,7 @@ public final class AuditLog {
     private static final ArrayDeque<Entry> HISTORY = new ArrayDeque<>();
     private static final ArrayBlockingQueue<Pending> QUEUE = new ArrayBlockingQueue<>(512);
     private static final ThreadLocal<Boolean> INTERNAL = ThreadLocal.withInitial(() -> false);
+    private static final CountDownLatch HISTORY_READY = new CountDownLatch(1);
     private static final AtomicLong REVISION = new AtomicLong();
     private static final AtomicLong SEQUENCE = new AtomicLong();
     private static final AtomicLong GENERATION = new AtomicLong();
@@ -227,25 +229,26 @@ public final class AuditLog {
         }
     }
 
-    /** Exports the retained view, not an unbounded archive. The first line states that scope. */
-    public static String exportJsonl() {
-        ArrayList<Entry> copy;
-        synchronized (LOCK) { copy = new ArrayList<>(HISTORY); }
-        StringBuilder out = new StringBuilder(512 + copy.size() * 512);
-        out.append("{\"schema\":\"fkclaude.audit.export.v1\",\"time\":")
-                .append(quote(Instant.now().toString()))
-                .append(",\"scope\":\"current_process_retained_window\",\"pid\":").append(pid)
-                .append(",\"retained\":").append(copy.size())
-                .append(",\"max_events\":").append(MAX_EVENTS)
-                .append(",\"queue_dropped\":").append(DROPPED.get())
-                .append(",\"disk_errors\":").append(DISK_ERRORS.get())
-                .append(",\"memory_evicted\":").append(EVICTED.get())
-                .append(",\"invalid_history\":").append(INVALID_HISTORY.get())
-                .append(",\"enabled\":").append(LOCK.isEnabled())
-                .append(",\"value_policy\":\"metadata_only\",\"server_receipt\":\"not_asserted\"}\n");
-        for (Entry entry : copy) out.append(entry.json()).append('\n');
-        return out.toString();
+    public static boolean isHistoryLoaded() { return historyLoaded; }
+
+    /** For background export work only; a timeout leaves the target document untouched. */
+    public static boolean awaitHistoryLoaded(long timeoutMs) throws InterruptedException {
+        if (timeoutMs < 0) throw new IllegalArgumentException("Negative history wait");
+        return HISTORY_READY.await(timeoutMs, TimeUnit.MILLISECONDS);
     }
+
+    /** Capture one retained window, its control state and counters under the recorder lock. */
+    public static AuditExportSnapshot exportSnapshot() {
+        return AuditExportSnapshot.capture(LOCK, () -> historyLoaded, () -> {
+            ArrayList<String> lines = new ArrayList<>(HISTORY.size());
+            for (Entry entry : HISTORY) lines.add(entry.json());
+            return lines;
+        }, () -> new AuditExportSnapshot.Metadata(pid, MAX_EVENTS, DROPPED.get(), DISK_ERRORS.get(),
+                EVICTED.get(), INVALID_HISTORY.get(), LOCK.isEnabled()));
+    }
+
+    /** Exports the retained view, not an unbounded archive. Throws until history is ready. */
+    public static String exportJsonl() { return exportSnapshot().toJsonl(); }
 
     /** Clear is asynchronous on disk; generation fencing prevents queued events returning. */
     public static void clear() {
@@ -283,7 +286,13 @@ public final class AuditLog {
             if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("Audit directory unavailable");
             restoreHistory(diskGeneration);
         } catch (Throwable failure) { failed(failure); }
-        finally { historyLoaded = true; REVISION.incrementAndGet(); }
+        finally {
+            synchronized (LOCK) {
+                historyLoaded = true;
+                REVISION.incrementAndGet();
+            }
+            HISTORY_READY.countDown();
+        }
         for (;;) {
             try {
                 if (savedEnabled != LOCK.isEnabled()) {
@@ -384,8 +393,10 @@ public final class AuditLog {
         if (stream != null) try { stream.close(); } catch (IOException failure) { failed(failure); }
     }
     private static void failed(Throwable failure) {
-        DISK_ERRORS.incrementAndGet();
-        lastError = failure.getClass().getSimpleName();
-        REVISION.incrementAndGet();
+        synchronized (LOCK) {
+            DISK_ERRORS.incrementAndGet();
+            lastError = failure.getClass().getSimpleName();
+            REVISION.incrementAndGet();
+        }
     }
 }

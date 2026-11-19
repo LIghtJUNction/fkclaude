@@ -23,7 +23,7 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Observers never replace arguments, results, exceptions, requests or response bodies. */
+/** Observation hooks preserve application behavior; module-owned picker callbacks are handled separately. */
 final class AuditHooks {
     private static boolean installed;
     private static final ThreadLocal<Boolean> INTERNAL = ThreadLocal.withInitial(() -> false);
@@ -66,8 +66,24 @@ final class AuditHooks {
     private static void lifecycle(ClassLoader loader) {
         hook("android.app.Instrumentation", loader, "callActivityOnCreate", new XC_MethodHook(10000) {
             @Override protected void beforeHookedMethod(MethodHookParam p) {
-                if (p.args.length > 0 && p.args[0] instanceof Activity activity)
+                if (p.args.length > 0 && p.args[0] instanceof Activity activity) {
                     rememberPanelRequest(activity, activity.getIntent(), "before_create");
+                    // A pending result can be delivered before the first onResume in a recreated process.
+                    try {
+                        activityResults(activity);
+                        if (p.args.length > 1 && p.args[1] instanceof Bundle saved
+                                && AuditPanel.restoreExportState(activity, saved)) REQUESTED_PANELS.add(activity);
+                    } catch (Throwable error) { failed("activity_export_restore", error); }
+                }
+            }
+        });
+        hook("android.app.Instrumentation", loader, "callActivityOnSaveInstanceState", new XC_MethodHook() {
+            @Override protected void afterHookedMethod(MethodHookParam p) {
+                if (!p.hasThrowable() && p.args.length > 1 && p.args[0] instanceof Activity activity
+                        && p.args[1] instanceof Bundle state) {
+                    try { AuditPanel.saveExportState(activity, state); }
+                    catch (Throwable error) { failed("activity_export_save", error); }
+                }
             }
         });
         hook("android.app.Instrumentation", loader, "callActivityOnResume", new XC_MethodHook() {
@@ -138,9 +154,11 @@ final class AuditHooks {
                 // Resolving every declared method can load optional platform types unrelated to result delivery.
                 java.lang.reflect.Method result = type.getDeclaredMethod("onActivityResult", int.class, int.class, Intent.class);
                 XposedBridge.hookMethod(result, new XC_MethodHook() {
-                    @Override protected void afterHookedMethod(MethodHookParam p) {
-                        try { AuditPanel.onActivityResult((Activity) p.thisObject, (Integer) p.args[0], (Integer) p.args[1], (Intent) p.args[2]); }
-                        catch (Throwable error) { failed("activity_result", error); }
+                    @Override protected void beforeHookedMethod(MethodHookParam p) {
+                        try {
+                            if (AuditPanel.onActivityResult((Activity) p.thisObject, (Integer) p.args[0],
+                                    (Integer) p.args[1], (Intent) p.args[2])) p.setResult(null);
+                        } catch (Throwable error) { failed("activity_result", error); }
                     }
                 });
             } catch (NoSuchMethodException ignored) {

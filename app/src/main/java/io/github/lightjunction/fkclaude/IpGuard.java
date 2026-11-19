@@ -30,6 +30,7 @@ final class IpGuard {
     private final ConnectivityManager connectivity;
     private final IpAllowlist allowlist;
     private final boolean usOnly;
+    private final PrivacyStartupGate startup;
     private final URI endpoint;
     private final int interval;
     private final int leaseMillis;
@@ -41,7 +42,8 @@ final class IpGuard {
     private String lastStatus = "";
     private SSLSocketFactory probeTls;
 
-    private IpGuard(Context context, Profile profile) {
+    private IpGuard(Context context, Profile profile, PrivacyStartupGate startup) {
+        this.startup = java.util.Objects.requireNonNull(startup);
         if (context.checkSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
                 != android.content.pm.PackageManager.PERMISSION_GRANTED) throw new SecurityException("Network state permission unavailable");
         connectivity = context.getSystemService(ConnectivityManager.class);
@@ -63,10 +65,10 @@ final class IpGuard {
 
     // The caller runs under Claude's UID; its permission is checked by the constructor above.
     @android.annotation.SuppressLint("MissingPermission")
-    static synchronized void install(Context context, Profile profile) {
+    static synchronized void install(Context context, Profile profile, PrivacyStartupGate startup) {
         if ((!profile.flag("ip_guard_enabled") && !profile.flag("privacy_us_only")) || instance != null) return;
         try {
-            IpGuard guard = new IpGuard(context, profile);
+            IpGuard guard = new IpGuard(context, profile, startup);
             System.loadLibrary("fkclaude");
             if (!nativeStart()) throw new IllegalStateException("Native egress gate unavailable");
             instance = guard;
@@ -85,6 +87,24 @@ final class IpGuard {
             XposedBridge.log("fkclaude: IP guard cannot enforce; terminating target (" + error.getClass().getSimpleName() + ")");
             android.os.Process.killProcess(android.os.Process.myPid());
             throw new IllegalStateException("IP guard enforcement failed");
+        }
+    }
+
+    static void privacyStateChanged() {
+        IpGuard guard = instance;
+        if (guard != null) guard.invalidate(); // Revoke first; READY always obtains a fresh route observation.
+    }
+
+    static void privacyFailed(PrivacyStartupGate startup) {
+        IpGuard guard = instance;
+        if (guard == null) { startup.fail(); return; }
+        // The same lock covers the final readiness check and nativePermit in verify().
+        // No new lease can cross FAILED publication; revoke existing leases before publishing it.
+        synchronized (guard.lock) {
+            guard.generation++;
+            guard.ipv4Until = guard.ipv6Until = 0;
+            try { nativeBlock(); }
+            finally { startup.fail(); }
         }
     }
 
@@ -113,7 +133,7 @@ final class IpGuard {
         IpGuard guard = instance;
         if (guard == null) return true;
         long now = SystemClock.elapsedRealtime();
-        return guard.ipv4Until > now || guard.ipv6Until > now;
+        return guard.startup.isReady() && (guard.ipv4Until > now || guard.ipv6Until > now);
     }
 
     private void invalidate() {
@@ -132,6 +152,8 @@ final class IpGuard {
         long epoch;
         synchronized (lock) { epoch = generation; }
         try {
+            // No probe or lease may begin while strict platform/Web privacy is still being installed.
+            if (!startup.isReady()) { report("blocked: privacy initialization pending"); return; }
             if (allowlist.isEmpty()) { report("blocked: empty allowlist"); return; }
             long network = networkHandle();
             synchronized (lock) {
@@ -153,7 +175,7 @@ final class IpGuard {
                 } catch (Exception error) { /* Timeout, TLS, framing or unknown IP means deny, never last-known allow. */ }
                 finally { nativeProbe(false); PROBE.remove(); }
                 synchronized (lock) {
-                    if (generation != epoch || networkHandle() != network) {
+                    if (!startup.isReady() || generation != epoch || networkHandle() != network) {
                         generation++; ipv4Until = ipv6Until = 0; nativeBlock(); return;
                     }
                     // Recheck freshness at the native linearization point, after any Java/GC pause.

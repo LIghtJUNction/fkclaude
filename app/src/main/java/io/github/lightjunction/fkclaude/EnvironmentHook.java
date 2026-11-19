@@ -40,7 +40,9 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
     private Profile profile;
     private boolean initialized;
     private int hookCount;
-    private String projectedUserAgent;
+    private volatile String projectedUserAgent;
+    private PrivacyStartupGate startup;
+    private Method defaultUserAgentMethod;
     // Read the platform level before any configured Build projection changes it.
     private final int platformSdk = Build.VERSION.SDK_INT;
     private final Set<String> reported = Collections.synchronizedSet(new HashSet<>());
@@ -97,7 +99,11 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
                 new XC_MethodHook() {
                     @Override protected void beforeHookedMethod(MethodHookParam param) {
                         Application application = (Application) param.args[0];
-                        if (Profile.TARGET.equals(application.getPackageName())) initialize(application, load.classLoader);
+                        if (Profile.TARGET.equals(application.getPackageName())) {
+                            initialize(application, load.classLoader);
+                            if (!finishStrictPrivacy(application, load.classLoader))
+                                param.setThrowable(new SecurityException("Privacy startup unavailable"));
+                        }
                     }
                 });
     }
@@ -123,8 +129,9 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             } else log("configuration channel=private provider");
             if (encoded == null) throw new IllegalStateException("Profile unavailable");
             profile = PropertyView.normalize(Profile.parse(encoded));
+            startup = new PrivacyStartupGate(profile.flag("privacy_us_only"));
             initialized = true; // Freeze only after configuration was actually obtained; never install twice.
-            IpGuard.install(context, profile);
+            IpGuard.install(context, profile, startup);
             AuditNative.install(profile.flag("ip_guard_enabled"));
             AuditLog.record("system", "environment_policy", "EnvironmentHook", "observed",
                     Map.of("phase", profile.enabled() ? "modified_environment" : "environment_disabled",
@@ -133,7 +140,6 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             // Standard privacy controls remain active even when targeted app hooks are unavailable.
             if (profile.flag("privacy_us_only")) {
                 installPlatformPrivacy(context, loader);
-                selfCheck(context);
             }
             if (version != Profile.TARGET_VERSION) {
                 if (profile.flag("privacy_us_only")) {
@@ -146,14 +152,71 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             }
             if (!profile.enabled()) { log("environment disabled; IP guard remains independent"); return; }
             install(context, loader);
-            log("installed " + hookCount + " hooks for target version " + version);
-            if (!profile.flag("privacy_us_only")) selfCheck(context);
+            if (profile.flag("privacy_us_only")) log("early privacy installed; Web and egress waiting for application readiness");
+            else {
+                log("installed " + hookCount + " hooks for target version " + version);
+                selfCheck(context);
+            }
         } catch (Throwable e) {
-            log("initialization failed: " + e.getClass().getSimpleName());
-            StackTraceElement[] frames = e.getStackTrace();
-            for (int i = 0; i < Math.min(frames.length, 4); i++) log("initialization frame: " + frames[i]);
-            // Policy read/initialization failure must not silently bypass a possibly enabled guard.
-            android.os.Process.killProcess(android.os.Process.myPid());
+            try { if (startup != null) IpGuard.privacyFailed(startup); }
+            finally {
+                try {
+                    log("initialization failed: " + e.getClass().getSimpleName());
+                    StackTraceElement[] frames = e.getStackTrace();
+                    for (int i = 0; i < Math.min(frames.length, 4); i++) log("initialization frame: " + frames[i]);
+                } finally {
+                    // Neither a failed revocation nor a caller swallowing an exception may continue the target.
+                    android.os.Process.killProcess(android.os.Process.myPid());
+                }
+            }
+        }
+    }
+
+    private boolean finishStrictPrivacy(Application application, ClassLoader loader) {
+        if (profile == null) return false;
+        if (!profile.flag("privacy_us_only")) return true;
+        try {
+            if (!startup.beginFinalization()) return startup.isReady();
+            Object current = XposedHelpers.callStaticMethod(
+                    XposedHelpers.findClass("android.app.ActivityThread", loader), "currentApplication");
+            if (current != application || android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
+                throw new IllegalStateException("Application is not ready for Web privacy");
+            // Bypass only this one internal getter invocation. Public early calls remain gated.
+            Object original = XposedBridge.invokeOriginalMethod(defaultUserAgentMethod, null, new Object[]{application});
+            if (!(original instanceof String raw)) throw new IllegalStateException("WebView user agent unavailable");
+            projectedUserAgent = PixelUserAgent.project(raw);
+            javaProperties.put("http.agent", projectedUserAgent);
+            installUserAgentHooks(loader);
+            WebEnvironment.install(profile, modulePath, projectedUserAgent, loader);
+            selfCheck(application);
+
+            // Initialize the framework class before opening the single-object bootstrap claim.
+            Class.forName("android.webkit.WebView", true, android.webkit.WebView.class.getClassLoader());
+            android.webkit.WebView probe = null;
+            startup.openBootstrap();
+            try {
+                probe = new android.webkit.WebView(application);
+                WebEnvironment.applyMetadata(probe.getSettings());
+                startup.confirmBootstrap(probe);
+            } finally {
+                try { if (probe != null) probe.destroy(); }
+                finally { startup.closeBootstrap(); }
+            }
+            startup.complete();
+            IpGuard.privacyStateChanged();
+            log("privacy startup ready; offline Web metadata and policy readbacks verified");
+            log("installed " + hookCount + " hooks for target version " + Profile.TARGET_VERSION);
+            return true;
+        } catch (Throwable failure) {
+            try { IpGuard.privacyFailed(startup); }
+            finally {
+                try {
+                    log("privacy startup failed: " + failure.getClass().getSimpleName());
+                    StackTraceElement[] frames = failure.getStackTrace();
+                    for (int i = 0; i < Math.min(frames.length, 4); i++) log("privacy startup frame: " + frames[i]);
+                } finally { android.os.Process.killProcess(android.os.Process.myPid()); }
+            }
+            return false;
         }
     }
 
@@ -284,17 +347,16 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
         buildProperties(loader);
         NativeBridge.install(profile, androidProperties);
         projectedUserAgent = profile.has("user_agent") ? profile.get("user_agent") : null;
-        if (profile.flag("privacy_us_only")) {
-            // This one internal read occurs before our UA hook; the original is never logged or stored.
-            projectedUserAgent = PixelUserAgent.project(android.webkit.WebSettings.getDefaultUserAgent(context));
-            javaProperties.put("http.agent", projectedUserAgent);
-        }
+        if (profile.flag("privacy_us_only")) installEarlyWebGates(loader);
         environmentAndCommands(loader);
         androidIdentity(loader);
         locale(loader);
         network(loader);
         privateData(loader);
-        WebEnvironment.install(profile, modulePath, projectedUserAgent, loader);
+        if (!profile.flag("privacy_us_only")) {
+            installUserAgentHooks(loader);
+            WebEnvironment.install(profile, modulePath, projectedUserAgent, loader);
+        }
         if (profile.flag("privacy_us_only") && !installedPolicyHooks.containsAll(requiredPolicyHooks))
             throw new IllegalStateException("Required privacy hooks missing");
     }
@@ -534,10 +596,37 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
             hook("android.net.NetworkCapabilities", loader, "getTransportTypes", true, p ->
                     p.setResult(new int[]{(int) profile.number("network_transport")}));
         }
+    }
+
+    private void installEarlyWebGates(ClassLoader loader) throws Throwable {
+        defaultUserAgentMethod = android.webkit.WebSettings.class.getDeclaredMethod("getDefaultUserAgent", Context.class);
+        hook("android.webkit.WebSettings", loader, "getDefaultUserAgent", true, call -> {
+            String projected = projectedUserAgent;
+            if (projected == null) call.setThrowable(new SecurityException("Web identity is not ready"));
+            else call.setResult(projected);
+        });
+        Set<XC_MethodHook.Unhook> constructors = XposedBridge.hookAllConstructors(
+                android.webkit.WebView.class, new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam call) {
+                        if (startup == null || !startup.allowConstructor(call.thisObject))
+                            call.setThrowable(new SecurityException("Web privacy is not ready"));
+                    }
+                });
+        hookCount += constructors.size();
+        if (constructors.isEmpty()) throw new IllegalStateException("Early Web constructor gate unavailable");
+        int settings = hook("android.webkit.WebView", loader, "getSettings", true, call -> {
+            if (startup == null || !startup.allowAccess(call.thisObject))
+                call.setThrowable(new SecurityException("Web privacy is not ready"));
+        });
+        if (settings == 0) throw new IllegalStateException("Early Web settings gate unavailable");
+    }
+
+    private void installUserAgentHooks(ClassLoader loader) {
         if (projectedUserAgent != null) {
             final String userAgent = projectedUserAgent;
             final boolean strict = profile.flag("privacy_us_only");
-            hook("android.webkit.WebSettings", loader, "getDefaultUserAgent", true, p -> p.setResult(userAgent));
+            if (!strict)
+                hook("android.webkit.WebSettings", loader, "getDefaultUserAgent", true, p -> p.setResult(userAgent));
             // WebSettings getters/setters are abstract. Require both concrete provider hooks in strict mode.
             try {
                 Set<XC_MethodHook.Unhook> constructors = XposedBridge.hookAllConstructors(android.webkit.WebView.class, new XC_MethodHook() {
@@ -558,8 +647,11 @@ public final class EnvironmentHook implements IXposedHookLoadPackage, IXposedHoo
                                                 catch (Throwable failure) {
                                                     // The original setter already ran. A host may catch an exception,
                                                     // so stop this process before an existing WebView can keep loading.
-                                                    try { log("strict privacy blocked: web_metadata_unverified"); }
-                                                    finally { android.os.Process.killProcess(android.os.Process.myPid()); }
+                                                    try { IpGuard.privacyFailed(startup); }
+                                                    finally {
+                                                        try { log("strict privacy blocked: web_metadata_unverified"); }
+                                                        finally { android.os.Process.killProcess(android.os.Process.myPid()); }
+                                                    }
                                                     throw failure;
                                                 }
                                             }) : 1;

@@ -85,14 +85,16 @@ final class AuditPanel {
     private Switch onlyNonConversation;
     private Switch recording;
     private Button pause;
-    private boolean paused, loading, disposed, suspended, updatingToggle;
+    private boolean paused, disposed, suspended, updatingToggle;
     private long shownRevision = -1;
-    private int filterGeneration;
+    private final AuditRefreshGate refreshGate = new AuditRefreshGate();
+    // Used only by the serial UI worker; keeps only the most recently parsed window.
+    private final AuditEventCache<Event> eventCache = new AuditEventCache<>(300);
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             if (disposed || suspended || dialog == null || !dialog.isShowing()) return;
             updateRecordState();
-            if (!paused) refresh(false);
+            refresh(false);
             MAIN.postDelayed(this, 1000);
         }
     };
@@ -144,6 +146,8 @@ final class AuditPanel {
         AuditPanel panel = reference == null ? null : reference.get();
         if (panel != null) {
             panel.suspended = true;
+            if (MAIN.hasCallbacks(panel.searchChanged)) panel.refreshGate.request();
+            panel.refreshGate.invalidate(true);
             MAIN.removeCallbacks(panel.tick);
             MAIN.removeCallbacks(panel.searchChanged);
         }
@@ -158,6 +162,7 @@ final class AuditPanel {
         AuditPanel panel = reference == null ? null : reference.get();
         if (panel == null) return;
         panel.disposed = true;
+        panel.refreshGate.invalidate(false);
         MAIN.removeCallbacks(panel.tick);
         MAIN.removeCallbacks(panel.searchChanged);
         if (panel.detailDialog != null) panel.detailDialog.dismiss();
@@ -379,6 +384,8 @@ final class AuditPanel {
         LinearLayout actions = row(activity);
         pause = button(activity, "暂停刷新", v -> {
             paused = !paused;
+            refreshGate.invalidate(false);
+            MAIN.removeCallbacks(searchChanged);
             pause.setText(paused ? "继续刷新" : "暂停刷新");
             updateRecordState();
             if (!paused) refresh(true);
@@ -420,7 +427,7 @@ final class AuditPanel {
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                filterGeneration++;
+                refreshGate.invalidate(false);
                 MAIN.removeCallbacks(searchChanged);
                 MAIN.postDelayed(searchChanged, 250);
             }
@@ -432,7 +439,7 @@ final class AuditPanel {
             MAIN.removeCallbacks(searchChanged);
             if (detailDialog != null) { detailDialog.dismiss(); detailDialog = null; }
             if (clearDialog != null) { clearDialog.dismiss(); clearDialog = null; }
-            filterGeneration++;
+            refreshGate.invalidate(false);
             bubble.setVisibility(View.VISIBLE);
         });
         dialog.show();
@@ -464,7 +471,6 @@ final class AuditPanel {
     }
 
     private void filtersChanged() {
-        filterGeneration++;
         shownRevision = -1;
         refresh(true);
     }
@@ -493,47 +499,48 @@ final class AuditPanel {
 
     private void refresh(boolean force) {
         if (disposed || suspended || dialog == null || !dialog.isShowing() || search == null || category == null) return;
-        if (loading) {
-            if (force) shownRevision = -1;
-            return;
-        }
+        if (force) refreshGate.request();
         long revision = AuditLog.revision();
-        if (!force && (paused || revision == shownRevision)) return;
-        loading = true;
+        AuditRefreshGate.Ticket ticket = refreshGate.begin(!paused, revision != shownRevision);
+        if (ticket == null) return;
         String query = search.getText().toString();
         String selected = CATEGORIES[category.getSelectedItemPosition()];
         boolean nonConversation = onlyNonConversation.isChecked();
-        int generation = filterGeneration;
         Activity activity = owner.get();
         boolean scheduled = submit(() -> {
-            List<Event> result = new ArrayList<>();
+            List<Event> result;
             String error = null;
             try {
-                for (String line : AuditLog.snapshot(query, selected, nonConversation, 300)) result.add(Event.parse(line));
+                result = eventCache.parse(AuditLog.snapshot(query, selected, nonConversation, 300), Event::parse);
             } catch (RuntimeException ignored) {
+                result = List.of();
                 error = "读取失败；稍后重试";
             }
+            List<Event> events = result;
             String failure = error;
             MAIN.post(() -> {
-                loading = false;
-                if (disposed || dialog == null || !dialog.isShowing()) return;
-                if (generation != filterGeneration) { refresh(true); return; }
+                boolean current = refreshGate.complete(ticket);
+                if (disposed || suspended || dialog == null || !dialog.isShowing()) return;
+                if (!current) {
+                    if (refreshGate.hasRequest()) refresh(false);
+                    return;
+                }
                 if (failure != null) { status.setText(failure); return; }
                 int first = list.getFirstVisiblePosition();
                 int top = list.getChildAt(0) == null ? 0 : list.getChildAt(0).getTop();
                 String anchor = first > 0 && first < adapter.items.size() ? adapter.items.get(first).identity : null;
-                adapter.items = result;
+                adapter.items = events;
                 adapter.notifyDataSetChanged();
                 if (anchor != null) {
-                    for (int i = 0; i < result.size(); i++) {
-                        if (anchor.equals(result.get(i).identity)) { list.setSelectionFromTop(i, top); break; }
+                    for (int i = 0; i < events.size(); i++) {
+                        if (anchor.equals(events.get(i).identity)) { list.setSelectionFromTop(i, top); break; }
                     }
                 }
                 shownRevision = revision;
                 updateRecordState();
             });
         }, activity);
-        if (!scheduled) loading = false;
+        if (!scheduled) refreshGate.rejected(ticket);
     }
 
     private void showDetails(String json) {
@@ -564,7 +571,7 @@ final class AuditPanel {
                 .setNegativeButton("取消", null)
                 .setPositiveButton("清空", (d, which) -> submit(() -> {
                     AuditLog.clear();
-                    MAIN.post(() -> { filterGeneration++; refresh(true); });
+                    MAIN.post(() -> refresh(true));
                 }, activity)).create();
         clearDialog = confirmation;
         confirmation.setOnDismissListener(d -> {

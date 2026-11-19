@@ -5,6 +5,10 @@
 #include "ip_guard.hpp"
 #include <arpa/inet.h>
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <future>
+#include <thread>
 #include <cassert>
 #include <cerrno>
 #include <cstring>
@@ -25,6 +29,14 @@ std::map<std::string, void*> wrappers;
 std::map<void*, std::string> names;
 std::string missing;
 std::uint64_t dropped = 0;
+std::promise<void> capture_paused;
+std::shared_future<void> resume_capture;
+std::atomic<bool> pause_next_capture{false};
+void pause_before_enqueue() {
+    if (!pause_next_capture.exchange(false)) return;
+    capture_paused.set_value();
+    assert(resume_capture.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+}
 void* resolver(const char* name) {
     if (missing == name) return nullptr;
     auto target = dlsym(RTLD_DEFAULT, name);
@@ -191,6 +203,38 @@ int main() {
         assert(take().empty());
     }
     {
+        // Pause a captured batch before queue admission, then reset and resume.
+        // A boolean-only enabled check admits all old messages into the new window.
+        Udp udp;
+        std::array<mmsghdr, 3> batch{};
+        for (auto& message : batch) {
+            message.msg_hdr.msg_name = &udp.destination;
+            message.msg_hdr.msg_namelen = sizeof(udp.destination);
+            message.msg_len = 1;
+        }
+        auto paused = capture_paused.get_future();
+        std::promise<void> release;
+        resume_capture = release.get_future().share();
+        pause_next_capture.store(true);
+        audit::set_before_enqueue_for_test(pause_before_enqueue);
+        std::thread producer([&] {
+            errno = EDOM;
+            audit::observe_messages(udp.sender, 3, 0, batch.data(), batch.size());
+            assert(errno == EDOM);
+        });
+        assert(paused.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+        audit::set_enabled(false);
+        audit::set_enabled(true);
+        release.set_value();
+        producer.join();
+        audit::set_before_enqueue_for_test(nullptr);
+        assert(audit::enabled());
+        assert(take().empty() && dropped == 0);
+        assert(udp.send("new", 3) == 3);
+        auto events = take();
+        assert(events.size() == 1 && events[0].bytes == 3);
+    }
+    {
         Tcp tcp;
         auto events = take();
         assert(events.size() == 1 && events[0].operation == audit::Operation::Connect && events[0].bytes == 0);
@@ -256,5 +300,5 @@ int main() {
     }
     audit::set_enabled(false);
     guard::stop_for_test();
-    std::cout << "network audit tests passed: metadata, errno, payload preservation, pause, loss, shared guard\n";
+    std::cout << "network audit tests passed: metadata, errno, payload preservation, pause, epoch fencing, loss, shared guard\n";
 }

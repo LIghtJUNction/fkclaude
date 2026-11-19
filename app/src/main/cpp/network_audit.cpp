@@ -21,7 +21,8 @@ namespace {
 struct State {
     std::mutex queue_mutex;
     std::mutex installation;
-    std::atomic<bool> enabled{false};
+    // Low bit is enabled; upper bits change on every control boundary.
+    std::atomic<std::uint64_t> recording_epoch{0};
     std::atomic<std::uint64_t> dropped{0};
     std::array<Event, QUEUE_CAPACITY> events{};
     std::size_t head = 0, size = 0;
@@ -30,6 +31,7 @@ struct State {
     bool installed = false, guard_mode = false;
 #ifdef FKCLAUDE_HOST_TEST
     void* (*resolver)(const char*) = nullptr;
+    void (*before_enqueue)() = nullptr;
 #endif
 };
 // Inline hooks can execute during process teardown.
@@ -90,12 +92,12 @@ bool socket_metadata(int fd, Event& event, const sockaddr* address, socklen_t le
     event.socket_type = type;
     return true;
 }
-void capture(int fd, Operation operation, std::int64_t result, std::int64_t bytes,
+void capture(std::uint64_t epoch, int fd, Operation operation, std::int64_t result, std::int64_t bytes,
              int error, const sockaddr* address, socklen_t length,
              std::uint8_t flags, int batch_count = 0) noexcept {
     PreserveErrno preserve;
     auto& s = state();
-    if (!s.enabled.load(std::memory_order_acquire) || observing) return;
+    if ((epoch & 1) == 0 || observing) return;
     observing = true;
     Event event{};
     if (socket_metadata(fd, event, address, length)) {
@@ -108,15 +110,18 @@ void capture(int fd, Operation operation, std::int64_t result, std::int64_t byte
         event.batch_count = batch_count;
         event.elapsed_ms = clock_ms();
         event.thread_id = static_cast<std::int64_t>(syscall(SYS_gettid));
+#ifdef FKCLAUDE_HOST_TEST
+        if (s.before_enqueue) s.before_enqueue();
+#endif
         if (s.queue_mutex.try_lock()) {
-            if (s.enabled.load(std::memory_order_relaxed)) {
+            if (s.recording_epoch.load(std::memory_order_relaxed) == epoch) {
                 if (s.size < QUEUE_CAPACITY) {
                     s.events[(s.head + s.size) % QUEUE_CAPACITY] = event;
                     ++s.size;
                 } else s.dropped.fetch_add(1, std::memory_order_relaxed);
             }
             s.queue_mutex.unlock();
-        } else if (s.enabled.load(std::memory_order_relaxed))
+        } else if (s.recording_epoch.load(std::memory_order_relaxed) == epoch)
             s.dropped.fetch_add(1, std::memory_order_relaxed);
     }
     observing = false;
@@ -240,37 +245,43 @@ void set_enabled(bool value) noexcept {
     PreserveErrno preserve;
     auto& s = state();
     std::lock_guard<std::mutex> lock(s.queue_mutex);
-    s.enabled.store(value, std::memory_order_release);
+    auto epoch = s.recording_epoch.load(std::memory_order_relaxed);
+    s.recording_epoch.store(((epoch + 2) & ~std::uint64_t{1}) | (value ? 1 : 0),
+                            std::memory_order_release);
     if (!value) {
         s.head = s.size = 0;
         s.events.fill(Event{});
         s.dropped.store(0, std::memory_order_relaxed);
     }
 }
-bool enabled() noexcept { return state().enabled.load(std::memory_order_acquire); }
+bool enabled() noexcept { return (state().recording_epoch.load(std::memory_order_acquire) & 1) != 0; }
 void observe(int fd, Operation operation, std::int64_t result, int error,
              const sockaddr* address, socklen_t length, bool guard_blocked) noexcept {
-    if (!enabled()) return;
+    const auto epoch = state().recording_epoch.load(std::memory_order_acquire);
+    if ((epoch & 1) == 0) return;
     // Failed syscalls can receive invalid userspace pointers. Never inspect them.
     const bool accepted_address = result >= 0 ||
         (operation == Operation::Connect && error == EINPROGRESS);
-    capture(fd, operation, result, operation == Operation::Connect ? 0 : (result > 0 ? result : 0),
+    capture(epoch, fd, operation, result, operation == Operation::Connect ? 0 : (result > 0 ? result : 0),
             error, accepted_address ? address : nullptr, accepted_address ? length : 0,
             guard_blocked ? GuardBlocked : 0);
 }
 void observe_message(int fd, Operation operation, std::int64_t result, int error,
                      const msghdr* message, bool guard_blocked) noexcept {
-    if (!enabled()) return;
+    const auto epoch = state().recording_epoch.load(std::memory_order_acquire);
+    if ((epoch & 1) == 0) return;
     const auto* safe = result >= 0 ? message : nullptr;
-    observe(fd, operation, result, error, safe ? static_cast<const sockaddr*>(safe->msg_name) : nullptr,
-            safe ? safe->msg_namelen : 0, guard_blocked);
+    capture(epoch, fd, operation, result, result > 0 ? result : 0, error,
+            safe ? static_cast<const sockaddr*>(safe->msg_name) : nullptr,
+            safe ? safe->msg_namelen : 0, guard_blocked ? GuardBlocked : 0);
 }
 void observe_messages(int fd, int result, int error, const mmsghdr* messages,
                       unsigned count, bool guard_blocked) noexcept {
     PreserveErrno preserve;
-    if (!enabled()) return;
+    const auto epoch = state().recording_epoch.load(std::memory_order_acquire);
+    if ((epoch & 1) == 0) return;
     if (result <= 0 || !messages) {
-        capture(fd, Operation::Sendmmsg, result, 0, error, nullptr, 0,
+        capture(epoch, fd, Operation::Sendmmsg, result, 0, error, nullptr, 0,
                 guard_blocked ? GuardBlocked : 0, result > 0 ? result : 0);
         return;
     }
@@ -279,11 +290,11 @@ void observe_messages(int fd, int result, int error, const mmsghdr* messages,
     unsigned sampled = accepted > 16 ? 16 : accepted;
     for (unsigned i = 0; i < sampled; ++i) {
         const auto& message = messages[i];
-        capture(fd, Operation::Sendmmsg, result, message.msg_len, 0,
+        capture(epoch, fd, Operation::Sendmmsg, result, message.msg_len, 0,
                 static_cast<const sockaddr*>(message.msg_hdr.msg_name), message.msg_hdr.msg_namelen,
                 PerMessage, result);
     }
-    if (accepted > sampled && enabled())
+    if (accepted > sampled && state().recording_epoch.load(std::memory_order_relaxed) == epoch)
         state().dropped.fetch_add(accepted - sampled, std::memory_order_relaxed);
 }
 std::size_t drain(Event* events, std::size_t capacity, std::uint64_t& dropped) noexcept {
@@ -311,10 +322,12 @@ const char* operation_name(Operation operation) noexcept {
 }
 #ifdef FKCLAUDE_HOST_TEST
 void set_resolver_for_test(void* (*resolver)(const char*)) { state().resolver = resolver; }
+void set_before_enqueue_for_test(void (*callback)()) { state().before_enqueue = callback; }
 void reset_for_test() {
     set_enabled(false);
     auto& s = state();
     s.installed = false; s.mask = 0; s.guard_mode = false;
+    s.before_enqueue = nullptr;
     for (auto& hook : hooks) { hook.installed = false; hook.target = nullptr; }
     call_depth = probe_depth = 0;
 }

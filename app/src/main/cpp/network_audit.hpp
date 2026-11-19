@@ -51,6 +51,7 @@ std::size_t drain(Event* events, std::size_t capacity, std::uint64_t& dropped) n
 const char* operation_name(Operation operation) noexcept;
 #ifdef FKCLAUDE_HOST_TEST
 void set_resolver_for_test(void* (*resolver)(const char*));
+void set_before_enqueue_for_test(void (*callback)());
 void reset_for_test();
 #endif
 }

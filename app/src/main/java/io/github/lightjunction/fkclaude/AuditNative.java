@@ -5,15 +5,11 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 
 /** Process-local socket metadata. Native code never receives or copies body buffers. */
 final class AuditNative {
-    private static final AtomicBoolean ENABLED = new AtomicBoolean();
-    private static final AtomicLong GENERATION = new AtomicLong();
     private static volatile boolean ready;
-    private static boolean started;
+    private static volatile boolean started;
     private static volatile boolean errorReported;
 
     private AuditNative() {}
@@ -31,7 +27,7 @@ final class AuditNative {
             }
             started = true;
             ready = true;
-            setEnabled(AuditLog.isEnabled());
+            if (!AuditLog.synchronizeNative()) throw new IllegalStateException("Native control unavailable");
             ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1, task -> {
                 Thread worker = new Thread(task, "fkclaude-audit-native");
                 worker.setDaemon(true);
@@ -56,37 +52,35 @@ final class AuditNative {
     }
 
     /** Synchronous pause; clears pending native records before returning. */
-    static void setEnabled(boolean enabled) {
-        if (ENABLED.getAndSet(enabled) != enabled) GENERATION.incrementAndGet();
-        if (!ready) return;
-        try { nativeSetEnabled(enabled); }
+    static boolean setEnabled(boolean enabled) {
+        if (!ready) return !started;
+        try {
+            nativeSetEnabled(enabled);
+            return true;
+        }
         catch (Throwable failure) {
             ready = false;
             AuditLog.record("system", "native_observer_control_failed", "fkclaude", "failed",
                     Map.of("error_type", failure.getClass().getSimpleName()));
+            return false;
         }
     }
 
     private static void poll() {
         if (!ready) return;
         try {
-            // The UI calls setEnabled synchronously; this fallback only disables.
-            // A stale poll must never re-enable a recorder paused by the user.
-            if (!AuditLog.isEnabled()) {
-                if (ENABLED.get()) setEnabled(false);
-                return;
-            }
-            if (!ENABLED.get()) return;
-            long generation = GENERATION.get();
+            // Only the serialized UI/control path changes native recording state.
+            // A delayed poll cannot overwrite a newer pause/resume decision.
+            long epoch = AuditLog.captureEpoch();
+            if (epoch == AuditRecordingState.PAUSED) return;
             String[] lines = nativeDrain();
             if (lines == null) throw new IllegalStateException("Native drain unavailable");
             for (String line : lines) {
-                if (!AuditLog.isEnabled() || generation != GENERATION.get()) return;
                 if (line == null) continue;
                 String[] fields = line.split("\\|", -1);
                 if (fields.length == 2 && fields[0].equals("dropped")) {
                     long count = Long.parseLong(fields[1]);
-                    if (count > 0) AuditLog.record("system", "native_queue_dropped", "fkclaude", "dropped",
+                    if (count > 0) AuditLog.recordIfCurrent(epoch, "system", "native_queue_dropped", "fkclaude", "dropped",
                             Map.of("queue_dropped", Long.toString(count),
                                     "reason", "native_queue_contention_capacity_or_batch_limit", "layer", "native"));
                     continue;
@@ -122,7 +116,7 @@ final class AuditNative {
                 details.put("caller", (flags & 4) != 0 ? "fkclaude_ip_guard_probe" : "application");
                 details.put("classification", (flags & 4) != 0 ? "instrumentation" : "unknown");
                 if (error != 0) details.put("error_type", "errno_" + error);
-                AuditLog.record("network", "native_" + operation, "libc." + operation, outcome, details);
+                AuditLog.recordIfCurrent(epoch, "network", "native_" + operation, "libc." + operation, outcome, details);
             }
         } catch (Throwable failure) {
             if (!errorReported) {

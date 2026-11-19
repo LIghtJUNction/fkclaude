@@ -35,7 +35,7 @@ public final class AuditLog {
     private static final int MAX_LINE_BYTES = 4096;
     private static final int MAX_FILE_BYTES = 2 * 1024 * 1024;
     private static final int FILE_COUNT = 3;
-    private static final Object LOCK = new Object();
+    private static final AuditRecordingState LOCK = new AuditRecordingState();
     private static final ArrayDeque<Entry> HISTORY = new ArrayDeque<>();
     private static final ArrayBlockingQueue<Pending> QUEUE = new ArrayBlockingQueue<>(512);
     private static final ThreadLocal<Boolean> INTERNAL = ThreadLocal.withInitial(() -> false);
@@ -46,7 +46,7 @@ public final class AuditLog {
     private static final AtomicLong DISK_ERRORS = new AtomicLong();
     private static final AtomicLong INVALID_HISTORY = new AtomicLong();
     private static final AtomicLong EVICTED = new AtomicLong();
-    private static volatile boolean initialized, enabled, historyLoaded;
+    private static volatile boolean initialized, historyLoaded;
     private static volatile String lastError = "", session = "";
     private static volatile int pid;
     private static File directory;
@@ -67,21 +67,22 @@ public final class AuditLog {
                 Context app = context.getApplicationContext();
                 if (app == null) app = context;
                 preferences = app.getSharedPreferences("fkclaude_audit", Context.MODE_PRIVATE);
-                enabled = preferences.getBoolean("enabled", true);
+                boolean initialEnabled = preferences.getBoolean("enabled", true);
+                LOCK.setEnabled(initialEnabled, AuditNative::setEnabled);
                 directory = new File(app.getNoBackupFilesDir(), "fkclaude-audit");
                 String process = Application.getProcessName();
                 if (process == null) process = app.getPackageName();
                 filePrefix = "audit-" + Integer.toHexString(process.hashCode());
                 pid = Process.myPid();
                 session = UUID.randomUUID().toString();
-                Thread worker = new Thread(AuditLog::writeLoop, "fkclaude-audit-writer");
+                Thread worker = new Thread(() -> writeLoop(initialEnabled), "fkclaude-audit-writer");
                 worker.setDaemon(true);
                 initialized = true;
                 worker.start();
             }
         } catch (Throwable failure) {
             initialized = false;
-            enabled = false;
+            LOCK.setEnabled(false, AuditNative::setEnabled);
             failed(failure);
         } finally { INTERNAL.set(previous); }
         record("system", "audit_started", "fkclaude", "observed", Map.of(
@@ -92,20 +93,31 @@ public final class AuditLog {
 
     /** Hooks should skip callbacks originating in the logger itself. */
     public static boolean isInternal() { return Boolean.TRUE.equals(INTERNAL.get()); }
-    public static boolean isEnabled() { return initialized && enabled; }
+    public static boolean isEnabled() { return initialized && LOCK.isEnabled(); }
     public static long revision() { return REVISION.get(); }
 
     public static void setEnabled(boolean value) {
         if (!initialized) return;
         synchronized (LOCK) {
-            if (enabled == value) return;
-            enabled = value;
+            if (LOCK.isEnabled() == value) return;
+            boolean nativeApplied = LOCK.setEnabled(value, AuditNative::setEnabled);
             REVISION.incrementAndGet();
+            // Control events describe the recorder, not monitored application activity.
+            add("system", "recording_changed", "fkclaude", value ? "enabled" : "disabled",
+                    Map.of("enabled", String.valueOf(value),
+                            "state", nativeApplied ? "applied" : "native_control_failed"), true);
         }
-        AuditNative.setEnabled(value);
-        // Control events describe the recorder, not monitored application activity.
-        add("system", "recording_changed", "fkclaude", value ? "enabled" : "disabled",
-                Map.of("enabled", String.valueOf(value)), true);
+    }
+
+    static long captureEpoch() { return initialized ? LOCK.capture() : AuditRecordingState.PAUSED; }
+
+    static boolean synchronizeNative() {
+        return LOCK.synchronizeNative(AuditNative::setEnabled);
+    }
+
+    static void recordIfCurrent(long epoch, String category, String action, String source,
+                                String outcome, Map<String, String> details) {
+        add(category, action, source, outcome, details, false, epoch);
     }
 
     public static void record(String category, String action, String source, String outcome,
@@ -115,13 +127,17 @@ public final class AuditLog {
 
     private static void add(String category, String action, String source, String outcome,
                             Map<String, String> details, boolean control) {
-        if (!initialized || isInternal() || (!enabled && !control)) return;
+        add(category, action, source, outcome, details, control, AuditRecordingState.UNFENCED);
+    }
+
+    private static void add(String category, String action, String source, String outcome,
+                            Map<String, String> details, boolean control, long expectedEpoch) {
+        if (!initialized || isInternal() || (!LOCK.isEnabled() && !control)) return;
         INTERNAL.set(true);
         try {
             String safeCategory = category != null && category.matches("[a-z_]{1,32}") ? category : "unknown";
             Map<String, String> safeDetails = AuditSanitizer.details(details);
-            synchronized (LOCK) {
-                if (!enabled && !control) return;
+            LOCK.publish(expectedEpoch, control, () -> {
                 Entry entry = new Entry(safeCategory, eventJson(safeCategory, action, source, outcome, safeDetails));
                 if (entry.json().getBytes(StandardCharsets.UTF_8).length > MAX_LINE_BYTES) {
                     entry = new Entry(safeCategory, eventJson(safeCategory, action, source, outcome,
@@ -130,7 +146,7 @@ public final class AuditLog {
                 appendMemory(entry);
                 if (!QUEUE.offer(new Pending(GENERATION.get(), entry))) DROPPED.incrementAndGet();
                 REVISION.incrementAndGet();
-            }
+            });
         } catch (Throwable failure) { failed(failure); }
         finally { INTERNAL.set(false); }
     }
@@ -225,7 +241,7 @@ public final class AuditLog {
                 .append(",\"disk_errors\":").append(DISK_ERRORS.get())
                 .append(",\"memory_evicted\":").append(EVICTED.get())
                 .append(",\"invalid_history\":").append(INVALID_HISTORY.get())
-                .append(",\"enabled\":").append(enabled)
+                .append(",\"enabled\":").append(LOCK.isEnabled())
                 .append(",\"value_policy\":\"metadata_only\",\"server_receipt\":\"not_asserted\"}\n");
         for (Entry entry : copy) out.append(entry.json()).append('\n');
         return out.toString();
@@ -235,13 +251,17 @@ public final class AuditLog {
     public static void clear() {
         if (!initialized) return;
         synchronized (LOCK) {
-            GENERATION.incrementAndGet();
-            QUEUE.clear();
-            HISTORY.clear();
-            EVICTED.set(0);
-            REVISION.incrementAndGet();
+            boolean nativeCleared = LOCK.clear(AuditNative::setEnabled, () -> {
+                GENERATION.incrementAndGet();
+                QUEUE.clear();
+                HISTORY.clear();
+                EVICTED.set(0);
+                REVISION.incrementAndGet();
+            });
+            add("system", "audit_cleared", "fkclaude", nativeCleared ? "observed" : "partial",
+                    Map.of("coverage", "current_process",
+                            "state", nativeCleared ? "native_reset_applied" : "native_reset_unconfirmed"), true);
         }
-        add("system", "audit_cleared", "fkclaude", "observed", Map.of("coverage", "current_process"), true);
     }
 
     private static void appendMemory(Entry entry) {
@@ -253,10 +273,10 @@ public final class AuditLog {
         return new File(directory, filePrefix + (rotation == 0 ? "" : "." + rotation) + ".jsonl");
     }
 
-    private static void writeLoop() {
+    private static void writeLoop(boolean savedEnabled) {
         INTERNAL.set(true);
-        long diskGeneration = GENERATION.get();
-        boolean savedEnabled = enabled;
+        // Files on startup predate any clear(), including one before this worker starts.
+        long diskGeneration = 0;
         OutputStream stream = null;
         long fileSize = 0;
         try {
@@ -266,8 +286,8 @@ public final class AuditLog {
         finally { historyLoaded = true; REVISION.incrementAndGet(); }
         for (;;) {
             try {
-                if (savedEnabled != enabled) {
-                    boolean desired = enabled;
+                if (savedEnabled != LOCK.isEnabled()) {
+                    boolean desired = LOCK.isEnabled();
                     if (!preferences.edit().putBoolean("enabled", desired).commit())
                         throw new IOException("Audit preference commit failed");
                     savedEnabled = desired;

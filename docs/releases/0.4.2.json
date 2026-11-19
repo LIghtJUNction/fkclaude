@@ -1,0 +1,146 @@
+{
+  "schema": "fkclaude.release.v1",
+  "version": "0.4.2",
+  "version_code": 7,
+  "date": "2026-11-20",
+  "build_type": "debug",
+  "status": "verified_with_documented_runtime_boundaries",
+  "apk": {
+    "file_name": "fkclaude-0.4.2.apk",
+    "bytes": 4662008,
+    "sha256": "47e22e1491cd2fdcbef287bb9178168ece484215c4e93a43b5a7cee58c166af0",
+    "installed_on_test_device": true,
+    "installed_on_test_device_and_hash_verified": true,
+    "delivery_path": "artifacts/fkclaude-0.4.2.apk"
+  },
+  "source": {
+    "android_code_commit": "f7327920b86bf6a293f15ebe2598abc8a846cdf2",
+    "cli_code_commit": "28169393a0c0c404b6408745609c00129ba4b087",
+    "core_runtime_test_commit": "4b95e0bbfa9ef0a7d47797b7c8c6f98ace57ebca"
+  },
+  "verification": {
+    "java_tests": 71,
+    "java_failures": 0,
+    "java_errors": 0,
+    "java_skipped": 0,
+    "python_tests": 17,
+    "javascript_tests": 19,
+    "lint_errors": 0,
+    "lint_fatal": 0,
+    "lint_warnings": 10,
+    "apk_signature": "v2 verified",
+    "static_contracts": "passed",
+    "dex_method_contracts": 8,
+    "dex_field_contracts": 31,
+    "configurable_fields": 94,
+    "native_environment_adapters": 11,
+    "native_concurrent_reads": 40000,
+    "native_ip_guard": "passed",
+    "native_network_audit": "ASan and UBSan passed",
+    "native_16k_alignment": true,
+    "final_ui_build": "passed",
+    "runtime_environment": "PHK110 Android 16; Claude 1.261112.18 / 26111218; independent virtual display",
+    "new_audit_layout_visible": true,
+    "datadog_search": true,
+    "pause_list_refresh": true,
+    "recording_off_persists_across_process_restart": true,
+    "rapid_toggle_recovers_recording": true,
+    "cold_start_native_recording": true,
+    "software_keyboard": "IME was not shown on virtual display; not validated",
+    "category_selection": true,
+    "clear_while_recording": null,
+    "event_detail": true,
+    "saf_export": false,
+    "original_audit_history_restored": true,
+    "temporary_display_removed": true,
+    "non_conversation_filter": true,
+    "saf_file_picker_opened": true,
+    "saf_export_scope": "System save-location and all-files pickers opened. End-to-end save was not completed after multi-display task migration.",
+    "clear_while_recording_status": "not executed in this device run; clear while disabled was verified",
+    "original_audit_history_content_matched": true,
+    "recording_preference_enabled_after_tests": true,
+    "device_helpers_removed": true,
+    "test_logs_removed": true,
+    "app_stopped_after_tests": true,
+    "environment_preferences_comparison": "not separately performed in this run"
+  },
+  "core_runtime_observations": {
+    "source_commit": "4b95e0bbfa9ef0a7d47797b7c8c6f98ace57ebca",
+    "paused_refresh": {
+      "seconds": 32.535,
+      "native_events_before": 301,
+      "native_events_after": 335,
+      "list_pixels_unchanged": true,
+      "explicit_search_while_paused": true
+    },
+    "recording_disabled": {
+      "seconds": 3.215,
+      "native_events_before": 409,
+      "native_events_after": 409
+    },
+    "clear_while_disabled": {
+      "control_events": 1,
+      "native_events": 0
+    }
+  },
+  "final_runtime_observations": {
+    "source_commit": "f7327920b86bf6a293f15ebe2598abc8a846cdf2",
+    "recording_disabled_cold_start": true,
+    "rapid_toggle": {
+      "toggles": 7,
+      "elapsed_ms_approx": 793,
+      "all_applied": true,
+      "final_recording_enabled": true,
+      "new_native_events": 5,
+      "observer_errors": 0
+    },
+    "recording_enabled_cold_start": {
+      "native_events": 35,
+      "observer_errors": 0
+    },
+    "datadog_search_and_pause_rechecked": true,
+    "combined_telemetry_datadog_non_conversation_filter": true,
+    "event_detail_opened": true,
+    "saf_save_location_and_all_files_picker_opened": true,
+    "saf_document_saved": false,
+    "saf_scope": "target task migrated to another display; no completed document save or exported-file analysis in this run"
+  },
+  "changes": [
+    "Fence event publication across recording controls and clearing.",
+    "Reject stale list refresh results across pause, filters and lifecycle changes.",
+    "Reuse parsed events within the bounded current display window.",
+    "Keep camera and microphone outside non-conversation network summaries.",
+    "Preserve redacted DNS templates while hiding credentials and real IPs.",
+    "Increase spacing and clarify hierarchy in the dark audit panel."
+  ],
+  "performance_evidence": {
+    "measurement": "parser invocations in a controlled sliding-window unit test",
+    "initial_window": 300,
+    "after_one_new_event": 301,
+    "cache_maximum": 300,
+    "device_frame_rate_or_speedup_measured": false
+  },
+  "evidence": {
+    "build_and_ui_validation": "docs/validation-0.4.2.md",
+    "local_evidence_directory": "artifacts/iteration-0.4.2-2026-11-20/",
+    "final_build_summary": "final-build-summary.json",
+    "sanitized_screenshot": "docs/images/audit-0.4.2.jpg",
+    "installed_artifact_check": "installed-artifact-check.json",
+    "device_cleanup": "device-cleanup.json",
+    "private_raw_artifacts_committed": false,
+    "reviewed_ui_screenshot_committed": true
+  },
+  "cleanup": {
+    "history_restored": true,
+    "original_history_files": 1,
+    "content_fingerprint_matched": true,
+    "recording_enabled": true,
+    "fixture_history_removed": true,
+    "device_helpers_removed": true,
+    "app_stopped_after_tests": true,
+    "virtual_display_removed": true,
+    "owned_adb_server_stopped": true,
+    "temporary_recording_removed": true,
+    "private_intermediate_screenshots_removed": true
+  }
+}

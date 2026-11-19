@@ -220,11 +220,13 @@ int install(bool ip_guard_enabled) {
     auto& s = state();
     std::lock_guard<std::mutex> lock(s.installation);
     if (s.installed) return s.guard_mode == ip_guard_enabled ? s.mask : -1;
-    if (!s.hook) return -1;
+    if (!s.hook && !ip_guard_enabled) return -1;
     s.guard_mode = ip_guard_enabled;
-    // The caller has already installed the IP guard successfully when true.
-    s.mask = ip_guard_enabled ? 0x7c : 0;
-    unsigned limit = ip_guard_enabled ? 2 : 7;
+    // The caller has already installed the guard. It owns all seven observed
+    // entries, including write/writev, and shares Scope/observe with this queue.
+    // Do not patch an entry twice or require a second installer in guard mode.
+    s.mask = ip_guard_enabled ? 0x7f : 0;
+    unsigned limit = ip_guard_enabled ? 0 : 7;
     for (unsigned i = 0; i < limit; ++i) {
         auto& h = hooks[i];
         h.target = resolve(h.name);

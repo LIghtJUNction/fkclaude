@@ -121,8 +121,9 @@ bool allow(int fd, const sockaddr* a = nullptr, socklen_t n = 0, bool probe_conn
 }
 // Generic writes can carry Internet traffic too. Non-socket/Unix paths never
 // take the guard mutex or log: libc may write during installation/revocation.
-bool allow_output(int fd) {
+bool allow_output(int fd, bool* internet = nullptr) {
     int saved = errno;
+    if (internet) *internet = false;
     struct stat st{};
     if (fstat(fd, &st) != 0) {
         if (errno == EBADF) { errno = saved; return true; }
@@ -140,6 +141,7 @@ bool allow_output(int fd) {
     }
     int family = address_family(reinterpret_cast<sockaddr*>(&address), length);
     if (!family) { errno = saved; return true; }
+    if (internet) *internet = true;
     auto& s = state();
     std::lock_guard<std::mutex> lock(s.mutex);
     bool ok = !s.active || s.leases[family == 4 ? 0 : 1] > now();
@@ -308,12 +310,28 @@ int guarded_gai(const char* node, const char* service, const addrinfo* hints, ad
     return original_gai(node, service, hints, out);
 }
 ssize_t guarded_write(int fd, const void* buffer, size_t count) {
-    if (!allow_output(fd)) return -1;
-    return original_write(fd, buffer, count);
+    network_audit::Scope scope;
+    bool internet = false;
+    if (!allow_output(fd, &internet)) {
+        if (internet && scope.outer())
+            network_audit::observe(fd, network_audit::Operation::Write, -1, errno, nullptr, 0, true);
+        return -1;
+    }
+    auto result = original_write(fd, buffer, count);
+    if (internet && scope.outer()) network_audit::observe(fd, network_audit::Operation::Write, result, errno);
+    return result;
 }
 ssize_t guarded_writev(int fd, const iovec* vectors, int count) {
-    if (!allow_output(fd)) return -1;
-    return original_writev(fd, vectors, count);
+    network_audit::Scope scope;
+    bool internet = false;
+    if (!allow_output(fd, &internet)) {
+        if (internet && scope.outer())
+            network_audit::observe(fd, network_audit::Operation::Writev, -1, errno, nullptr, 0, true);
+        return -1;
+    }
+    auto result = original_writev(fd, vectors, count);
+    if (internet && scope.outer()) network_audit::observe(fd, network_audit::Operation::Writev, result, errno);
+    return result;
 }
 ssize_t guarded_sendfile(int out, int in, off_t* offset, size_t count) {
     if (!allow_output(out)) return -1;

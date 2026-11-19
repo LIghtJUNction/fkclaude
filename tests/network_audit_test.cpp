@@ -28,6 +28,7 @@ namespace {
 std::map<std::string, void*> wrappers;
 std::map<void*, std::string> names;
 std::string missing;
+unsigned hook_invocations = 0;
 std::uint64_t dropped = 0;
 std::promise<void> capture_paused;
 std::shared_future<void> resume_capture;
@@ -46,6 +47,7 @@ void* resolver(const char* name) {
 }
 int hook(void* target, void* replacement, void** original) {
     assert(names.count(target));
+    ++hook_invocations;
     *original = target;
     wrappers[names.at(target)] = replacement;
     return 0;
@@ -270,12 +272,16 @@ int main() {
         assert(std::strcmp(events[0].address, "::1") == 0 && events[0].bytes == 2);
         close(socket6);
     }
-    // The guard owns connect/send symbols; the observer only installs write/writev.
+    // The guard owns all seven observed symbols. Audit installation must not
+    // replace write/writev or even invoke a separate installer in shared mode.
     audit::reset_for_test(); wrappers.clear();
     guard::set_hook_function(hook); guard::set_resolver_for_test(resolver);
     assert(guard::start());
-    auto guarded_send = wrappers.at("send");
-    assert(audit::install(true) == 127 && wrappers.at("send") == guarded_send);
+    const auto shared_wrappers = wrappers;
+    const auto installs_before_audit = hook_invocations;
+    audit::set_hook_function(nullptr);
+    assert(audit::install(true) == 127 && audit::install(true) == 127);
+    assert(hook_invocations == installs_before_audit && wrappers == shared_wrappers);
     audit::set_enabled(true);
     {
         Udp udp;
@@ -285,6 +291,70 @@ int main() {
         guard::permit(4, 10000);
         assert(udp.send("x", 1) == 1);
         events = take(); assert(events.size() == 1 && events[0].bytes == 1);
+    }
+    {
+        guard::permit(4, 10000);
+        Tcp tcp;
+        auto events = take();
+        assert(events.size() == 1 && events[0].operation == audit::Operation::Connect);
+        errno = EDOM;
+        assert(wrap<W>("write")(tcp.client, "ab", 2) == 2 && errno == EDOM);
+        events = take();
+        assert(events.size() == 1 && events[0].operation == audit::Operation::Write);
+        assert(events[0].result == 2 && events[0].bytes == 2 && events[0].error == 0 && events[0].flags == 0);
+        iovec vectors[]{{const_cast<char*>("cd"), 2}, {const_cast<char*>("ef"), 2}};
+        errno = ERANGE;
+        assert(wrap<WV>("writev")(tcp.client, vectors, 2) == 4 && errno == ERANGE);
+        events = take();
+        assert(events.size() == 1 && events[0].operation == audit::Operation::Writev);
+        assert(events[0].result == 4 && events[0].bytes == 4 && events[0].error == 0 && events[0].flags == 0);
+        char received[6]{};
+        assert(recv(tcp.peer, received, sizeof(received), MSG_WAITALL) == 6);
+        assert(std::memcmp(received, "abcdef", 6) == 0);
+        // Leave the connection alive: denied writes must be observed as gate
+        // decisions, rather than merely failing because shutdown killed it.
+        guard::deny_without_revoke_for_test();
+        assert(send(tcp.client, "c", 1, MSG_NOSIGNAL) == 1);
+        assert(recv(tcp.peer, received, 1, 0) == 1 && received[0] == 'c');
+        assert(wrap<W>("write")(tcp.client, reinterpret_cast<const void*>(1), 1) == -1 && errno == EACCES);
+        events = take();
+        assert(events.size() == 1 && events[0].operation == audit::Operation::Write);
+        assert(events[0].result == -1 && events[0].bytes == 0 && events[0].error == EACCES);
+        assert(events[0].flags == audit::GuardBlocked);
+        assert(wrap<WV>("writev")(tcp.client, reinterpret_cast<const iovec*>(1), 1) == -1 && errno == EACCES);
+        events = take();
+        assert(events.size() == 1 && events[0].operation == audit::Operation::Writev);
+        assert(events[0].result == -1 && events[0].bytes == 0 && events[0].error == EACCES);
+        assert(events[0].flags == audit::GuardBlocked);
+        assert(recv(tcp.peer, received, sizeof(received), MSG_DONTWAIT) == -1
+                && (errno == EAGAIN || errno == EWOULDBLOCK));
+        // Pausing recording must not change guard permission or leak stale rows.
+        audit::set_enabled(false);
+        assert(wrap<W>("write")(tcp.client, "x", 1) == -1 && errno == EACCES);
+        assert(wrap<WV>("writev")(tcp.client, vectors, 2) == -1 && errno == EACCES);
+        assert(take().empty());
+        guard::permit(4, 10000);
+        assert(wrap<W>("write")(tcp.client, "p", 1) == 1);
+        assert(wrap<WV>("writev")(tcp.client, vectors, 2) == 4);
+        assert(take().empty());
+        assert(recv(tcp.peer, received, 5, MSG_WAITALL) == 5);
+        assert(std::memcmp(received, "pcdef", 5) == 0);
+        guard::deny_without_revoke_for_test();
+        audit::set_enabled(true);
+        assert(take().empty());
+    }
+    {
+        // Local I/O stays functional and produces no network events in shared mode.
+        int pipefd[2], unixfd[2];
+        assert(pipe(pipefd) == 0 && socketpair(AF_UNIX, SOCK_STREAM, 0, unixfd) == 0);
+        int file = open("/dev/null", O_WRONLY); assert(file >= 0);
+        iovec vectors[]{{const_cast<char*>("x"), 1}};
+        for (int fd : {pipefd[1], unixfd[0], file}) {
+            assert(wrap<W>("write")(fd, "x", 1) == 1);
+            assert(wrap<WV>("writev")(fd, vectors, 1) == 1);
+        }
+        assert(take().empty());
+        close(pipefd[0]); close(pipefd[1]); close(unixfd[0]); close(unixfd[1]); close(file);
     }
     guard::probe(true);
     {
@@ -296,6 +366,15 @@ int main() {
         assert(probeUdp.send("p", 1) == 1);
         auto events = take();
         assert(events.size() == 1 && (events[0].flags & audit::GuardProbe));
+        assert(wrap<W>("write")(probeUdp.sender, "w", 1) == 1);
+        events = take();
+        assert(events.size() == 1 && events[0].operation == audit::Operation::Write
+                && events[0].flags == audit::GuardProbe);
+        iovec vectors[]{{const_cast<char*>("v"), 1}};
+        assert(wrap<WV>("writev")(probeUdp.sender, vectors, 1) == 1);
+        events = take();
+        assert(events.size() == 1 && events[0].operation == audit::Operation::Writev
+                && events[0].flags == audit::GuardProbe);
         guard::probe(false);
     }
     audit::set_enabled(false);
